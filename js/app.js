@@ -1,328 +1,403 @@
-/* ===========================
-   PayTrack Pro - Main App Controller
-   =========================== */
+/**
+ * app.js - Khởi tạo ứng dụng, routing, và layout chính
+ * PayTrack Pro
+ */
 
-/* ---- TOAST SYSTEM ---- */
-window.Toast = {
-  show(title, msg='', type='info', duration=4000) {
-    const icons = { success:'fa-check-circle', error:'fa-times-circle', warning:'fa-exclamation-triangle', info:'fa-info-circle' };
-    const container = document.getElementById('toastContainer');
-    const id = 'toast_' + Date.now();
-    const el = document.createElement('div');
-    el.className = `toast ${type}`;
-    el.id = id;
-    el.innerHTML = `
-      <i class="fas ${icons[type]||'fa-info-circle'} toast-icon"></i>
-      <div class="toast-body">
-        <div class="toast-title">${title}</div>
-        ${msg?`<div class="toast-msg">${msg}</div>`:''}
-      </div>
-      <button class="toast-close" onclick="document.getElementById('${id}').remove()"><i class="fas fa-times"></i></button>
-    `;
-    container.appendChild(el);
-    setTimeout(() => { if(document.getElementById(id)) el.remove(); }, duration);
-  }
-};
+const App = (() => {
+  'use strict';
 
-/* ---- MODAL SYSTEM ---- */
-window.openModal = function(id) {
-  document.getElementById(id)?.classList.add('show');
-};
-window.closeModal = function(id) {
-  document.getElementById(id)?.classList.remove('show');
-};
-window.closeModalOverlay = function(e, id) {
-  if (e.target === document.getElementById(id)) closeModal(id);
-};
+  let _currentPage = null;
+  let _searchTimeout = null;
 
-/* ---- NAVIGATION ---- */
-const PAGE_MAP = {
-  dashboard: { title:'Dashboard', render: () => DashboardPage.render() },
-  dossiers:  { title:'Danh sách Hồ sơ', render: () => DossiersPage.render() },
-  kanban:    { title:'Kanban Board', render: () => KanbanPage.render() },
-  create:    { title:'Tạo Hồ sơ mới', render: () => CreateDossierPage.render() },
-  audit:     { title:'Audit Log', render: () => AuditPage.render() },
-  notifications: { title:'Thông báo', render: () => NotificationsPage.render() },
-  reports:   { title:'Báo cáo', render: () => ReportsPage.render() },
-  users:     { title:'Quản lý Người dùng', render: () => UsersPage.render() },
-  settings:  { title:'Cài đặt', render: () => SettingsPage.render() },
-};
+  /* ─── Pages registry ─── */
+  const PAGES = {
+    dashboard:    { title: 'Dashboard',          icon: 'fa-tachometer-alt', fn: () => PageDashboard.render() },
+    dossiers:     { title: 'Danh sách Hồ sơ',   icon: 'fa-folder-open',    fn: () => PageDossiers.render() },
+    dossier_new:  { title: 'Tạo Hồ sơ mới',     icon: 'fa-plus',           fn: () => PageDossiers.renderNew() },
+    kanban:       { title: 'Kanban Board',        icon: 'fa-columns',        fn: () => PageKanban.render() },
+    audit:        { title: 'Audit Log',           icon: 'fa-history',        fn: () => PageAudit.render() },
+    notifications:{ title: 'Thông báo',          icon: 'fa-bell',           fn: () => PageNotifications.render() },
+    reports:      { title: 'Báo cáo & Xuất',     icon: 'fa-chart-bar',      fn: () => PageReports.render() },
+    users:        { title: 'Quản lý Người dùng', icon: 'fa-users',          fn: () => PageUsers.render(), adminOnly: true },
+    settings:     { title: 'Cài đặt Hệ thống',  icon: 'fa-cog',            fn: () => PageSettings.render(), adminOnly: true },
+    security:     { title: 'Bảo mật',            icon: 'fa-shield-alt',     fn: () => PageSecurity.render(), adminOnly: true }
+  };
 
-window.navigate = function(page, linkEl) {
-  // Update active nav
-  document.querySelectorAll('.nav-item').forEach(el => {
-    el.classList.remove('active');
-  });
-  if (linkEl) {
-    linkEl.classList.add('active');
-  } else {
-    document.querySelector(`[data-page="${page}"]`)?.classList.add('active');
+  /* ─── Bootstrap ─── */
+  function init() {
+    // Khởi tạo bảo mật đầu tiên
+    if (window.Security) Security.init();
+
+    // Restore session
+    const loggedIn = Auth.init();
+
+    if (loggedIn) {
+      showApp();
+    } else {
+      showLogin();
+    }
+
+    // Setup global handlers
+    setupEventHandlers();
+    setupSearch();
+    startDeadlineChecker();
+
+    console.info('[App] PayTrack Pro initialized');
   }
 
-  // Update breadcrumb
-  document.getElementById('breadcrumb').textContent = PAGE_MAP[page]?.title || page;
-
-  // Mobile: close sidebar
-  document.getElementById('sidebar').classList.remove('mobile-open');
-
-  // Render page
-  PAGE_MAP[page]?.render();
-};
-
-/* ---- AUTH UI ---- */
-window.doLogin = async function() {
-  const username = document.getElementById('loginUsername').value.trim();
-  const password = document.getElementById('loginPassword').value;
-  const errEl = document.getElementById('loginError');
-  const btn = document.getElementById('loginBtn');
-
-  if (!username || !password) {
-    errEl.textContent = 'Vui lòng nhập đầy đủ tên đăng nhập và mật khẩu!';
-    errEl.style.display = 'block';
-    return;
+  /* ─── Auth UI ─── */
+  function showLogin() {
+    document.getElementById('loginPage')?.classList.remove('hidden');
+    document.getElementById('appPage')?.classList.add('hidden');
+    setupLoginForm();
   }
 
-  btn.disabled = true;
-  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang đăng nhập...';
+  function showApp() {
+    document.getElementById('loginPage')?.classList.add('hidden');
+    document.getElementById('appPage')?.classList.remove('hidden');
 
-  await new Promise(r => setTimeout(r, 600));
-  const result = Auth.login(username, password);
-
-  if (result.success) {
-    errEl.style.display = 'none';
-    showApp();
-    Toast.show('Chào mừng!', `Xin chào ${result.user.full_name}!`, 'success');
-  } else {
-    errEl.textContent = result.message;
-    errEl.style.display = 'block';
-    btn.disabled = false;
-    btn.innerHTML = '<i class="fas fa-sign-in-alt"></i> Đăng nhập';
+    const user = Auth.getCurrentUser();
+    updateUserInfo(user);
+    updateSidebarPermissions(user);
+    loadNotificationBadge();
+    navigate('dashboard');
   }
-};
 
-window.doLogout = function() {
-  Auth.logout();
-  document.getElementById('mainApp').style.display = 'none';
-  document.getElementById('loginPage').style.display = 'flex';
-  document.getElementById('loginUsername').value = '';
-  document.getElementById('loginPassword').value = '';
-  document.getElementById('loginError').style.display = 'none';
-  document.getElementById('loginBtn').disabled = false;
-  document.getElementById('loginBtn').innerHTML = '<i class="fas fa-sign-in-alt"></i> Đăng nhập';
-  document.body.classList.remove('is-admin','is-telecom','is-biz','is-acc');
-};
+  function updateUserInfo(user) {
+    if (!user) return;
+    const e = Security.e;
+    const avatarEl = document.getElementById('userAvatar');
+    const nameEl   = document.getElementById('userName');
+    const roleEl   = document.getElementById('userRole');
 
-window.fillDemo = function(u, p) {
-  document.getElementById('loginUsername').value = u;
-  document.getElementById('loginPassword').value = p;
-  document.getElementById('loginError').style.display = 'none';
-};
+    if (avatarEl) {
+      avatarEl.textContent = e(user.avatar || '?');
+      avatarEl.style.background = e(user.color || '#6c757d');
+    }
+    if (nameEl) nameEl.textContent = user.displayName;
+    if (roleEl) roleEl.textContent = Auth.getRoleLabel(user.role);
 
-window.togglePwd = function(inputId='loginPassword') {
-  const input = document.getElementById(inputId);
-  const icon = inputId==='loginPassword' ? document.getElementById('eyeIcon') : input?.parentNode?.querySelector('i');
-  if (!input) return;
-  input.type = input.type === 'password' ? 'text' : 'password';
-  if (icon) icon.className = input.type === 'password' ? 'fas fa-eye' : 'fas fa-eye-slash';
-};
-
-/* ---- SHOW APP ---- */
-function showApp() {
-  const user = Auth.user;
-  document.getElementById('loginPage').style.display = 'none';
-  document.getElementById('mainApp').style.display = 'flex';
-
-  // Set body role class
-  document.body.classList.remove('is-admin','is-telecom','is-biz','is-acc');
-  if (user.role === 'admin') document.body.classList.add('is-admin');
-  else if (user.role === 'telecom_staff') document.body.classList.add('is-telecom');
-  else if (user.role === 'business_staff') document.body.classList.add('is-biz');
-  else if (user.role === 'accounting_staff') document.body.classList.add('is-acc');
-
-  updateUserUI();
-  updateNotifBadge();
-
-  // Role-based nav visibility
-  if (!Auth.can('create_dossier')) document.getElementById('navCreate')?.style && (document.getElementById('navCreate').style.display = 'none');
-
-  // Init dashboard
-  navigate('dashboard', document.querySelector('[data-page="dashboard"]'));
-}
-
-/* ---- UPDATE UI ---- */
-window.updateUserUI = function() {
-  const user = Auth.user;
-  if (!user) return;
-  const initials = Utils.getInitials(user.full_name);
-  const roleLabel = ROLE_LABELS[user.role] || user.role;
-
-  // Sidebar
-  const avatar = document.getElementById('sidebarAvatar');
-  if (avatar) { avatar.textContent = initials; }
-  const sName = document.getElementById('sidebarName');
-  if (sName) sName.textContent = user.full_name;
-  const sRole = document.getElementById('sidebarRole');
-  if (sRole) sRole.textContent = roleLabel;
-
-  // Topbar
-  const tAvatar = document.getElementById('topbarAvatar');
-  if (tAvatar) tAvatar.textContent = initials;
-  const tName = document.getElementById('topbarName');
-  if (tName) tName.textContent = user.full_name.split(' ').pop();
-  const ddName = document.getElementById('ddName');
-  if (ddName) ddName.textContent = user.full_name;
-  const ddRole = document.getElementById('ddRole');
-  if (ddRole) ddRole.textContent = roleLabel;
-};
-
-window.updateNotifBadge = function() {
-  const count = API.getUnreadCount();
-  const badge = document.getElementById('badgeNotif');
-  if (badge) badge.textContent = count;
-  const dot = document.getElementById('notifDot');
-  if (dot) {
-    if (count > 0) dot.classList.add('show');
-    else dot.classList.remove('show');
+    // Body class for role-based CSS
+    document.body.className = `role-${e(user.role)}`;
+    if (Auth.isAdmin()) document.body.classList.add('is-admin');
   }
-};
 
-/* ---- SIDEBAR TOGGLE ---- */
-window.toggleSidebar = function() {
-  const sidebar = document.getElementById('sidebar');
-  const main = document.getElementById('mainContent');
+  function updateSidebarPermissions(user) {
+    // Hiển thị/ẩn các mục admin
+    document.querySelectorAll('.admin-only').forEach(el => {
+      el.style.display = Auth.isAdmin() ? '' : 'none';
+    });
 
-  if (window.innerWidth <= 768) {
-    sidebar.classList.toggle('mobile-open');
-  } else {
-    sidebar.classList.toggle('collapsed');
-    main.classList.toggle('expanded');
+    // Ẩn nút tạo hồ sơ nếu không có quyền
+    const createBtn = document.getElementById('navCreateDossier');
+    if (createBtn) {
+      createBtn.style.display = Auth.hasPermission('dossier.create') || Auth.isAdmin() ? '' : 'none';
+    }
+
+    // Cập nhật badge số hồ sơ
+    const count = DB.dossiers.getAll().length;
+    const badge = document.getElementById('dossierCount');
+    if (badge) badge.textContent = count;
   }
-};
 
-/* ---- USER DROPDOWN ---- */
-window.toggleUserMenu = function() {
-  document.getElementById('userDropdown').classList.toggle('show');
-};
+  /* ─── Login Form ─── */
+  function setupLoginForm() {
+    const form      = document.getElementById('loginForm');
+    const submitBtn = document.getElementById('loginBtn');
+    const errorEl   = document.getElementById('loginError');
+    const lockoutEl = document.getElementById('lockoutTimer');
 
-document.addEventListener('click', e => {
-  const dd = document.getElementById('userDropdown');
-  if (dd && !e.target.closest('.topbar-user')) dd.classList.remove('show');
+    if (!form) return;
 
-  const sr = document.getElementById('searchResults');
-  if (sr && !e.target.closest('.search-bar')) sr.style.display = 'none';
-});
+    // Quick-fill demo accounts
+    document.querySelectorAll('.demo-account').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const usernameEl = document.getElementById('loginUsername');
+        const passwordEl = document.getElementById('loginPassword');
+        if (usernameEl) usernameEl.value = Security.e(btn.dataset.user);
+        if (passwordEl) passwordEl.value = btn.dataset.pass;
+        // Không auto-submit để user thấy thông tin
+      });
+    });
 
-/* ---- GLOBAL SEARCH ---- */
-window.globalSearchHandler = Utils.debounce(function() {
-  const q = document.getElementById('globalSearch')?.value?.trim();
-  const sr = document.getElementById('searchResults');
-  if (!sr) return;
-  if (!q || q.length < 2) { sr.style.display = 'none'; return; }
+    // Toggle password visibility
+    const toggleBtn = document.getElementById('togglePassword');
+    if (toggleBtn) {
+      toggleBtn.addEventListener('click', () => {
+        const pwd = document.getElementById('loginPassword');
+        if (!pwd) return;
+        const isText = pwd.type === 'text';
+        pwd.type = isText ? 'password' : 'text';
+        toggleBtn.querySelector('i').className = `fas ${isText ? 'fa-eye' : 'fa-eye-slash'}`;
+      });
+    }
 
-  const results = DB.dossiers.filter(d =>
-    !d.is_deleted && (
-      d.dossier_code.toLowerCase().includes(q.toLowerCase()) ||
-      d.project_name.toLowerCase().includes(q.toLowerCase()) ||
-      (d.contract_number||'').toLowerCase().includes(q.toLowerCase())
-    )
-  ).slice(0,8);
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
 
-  if (!results.length) {
-    sr.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:13px">Không tìm thấy kết quả</div>';
-  } else {
-    sr.innerHTML = results.map(d=>`
-      <div class="search-result-item" onclick="openDossierDetail('${d.id}');document.getElementById('searchResults').style.display='none'">
-        <div style="display:flex;justify-content:space-between;align-items:center">
-          <span class="sr-code">${d.dossier_code}</span>
-          ${Utils.statusBadge(d.status)}
-        </div>
-        <div class="sr-name">${d.project_name}</div>
-        <div class="sr-meta">${Utils.deptLabel(d.department)} · ${Utils.formatAmount(d.amount)} ₫ · ${Utils.formatDate(d.deadline)}</div>
-      </div>`).join('');
+      const username = document.getElementById('loginUsername')?.value || '';
+      const password = document.getElementById('loginPassword')?.value || '';
+
+      if (!username.trim() || !password) {
+        showFormError(errorEl, 'Vui lòng nhập đầy đủ tên đăng nhập và mật khẩu');
+        return;
+      }
+
+      Utils.dom.setLoading(submitBtn, true, 'Đang xác thực...');
+      hideFormError(errorEl);
+
+      const result = await Auth.login(username, password);
+
+      Utils.dom.setLoading(submitBtn, false);
+
+      if (result.ok) {
+        showApp();
+      } else {
+        showFormError(errorEl, result.reason);
+
+        // Hiển thị đếm ngược nếu bị khóa
+        if (result.locked && lockoutEl) {
+          lockoutEl.classList.remove('hidden');
+          startLockoutCountdown(result.remaining, lockoutEl, submitBtn, username);
+        }
+      }
+    });
   }
-  sr.style.display = 'block';
-}, 250);
 
-/* ---- KEYBOARD SHORTCUTS ---- */
-document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') {
-    document.querySelectorAll('.modal-overlay.show').forEach(m => m.classList.remove('show'));
-    document.getElementById('userDropdown')?.classList.remove('show');
-    document.getElementById('searchResults').style.display = 'none';
+  function showFormError(el, message) {
+    if (!el) return;
+    el.textContent = message;
+    el.classList.remove('hidden');
   }
-  if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
-    e.preventDefault();
-    document.getElementById('globalSearch')?.focus();
-  }
-  if ((e.ctrlKey || e.metaKey) && e.key === 'n' && Auth.can('create_dossier')) {
-    e.preventDefault();
-    navigate('create', null);
-  }
-});
 
-/* ---- DEADLINE ALERTS ---- */
-function checkDeadlineAlerts() {
-  const soon = DB.dossiers.filter(d => {
-    if (d.is_deleted || ['paid','archived'].includes(d.status)) return false;
-    const days = Utils.daysUntilDeadline(d.deadline);
-    return days !== null && days >= 0 && days <= 2;
-  });
+  function hideFormError(el) {
+    if (!el) return;
+    el.classList.add('hidden');
+    el.textContent = '';
+  }
 
-  if (soon.length > 0 && Auth.user) {
-    const relevant = soon.filter(d =>
-      Auth.isAdmin ||
-      d.created_by_id === Auth.userId ||
-      d.assigned_to_id === Auth.userId
-    );
-    if (relevant.length > 0) {
-      setTimeout(() => {
-        Toast.show(
-          `⚠️ ${relevant.length} hồ sơ sắp đến hạn`,
-          relevant.map(d=>d.dossier_code).join(', '),
-          'warning',
-          6000
-        );
-      }, 2000);
+  function startLockoutCountdown(remainingMs, timerEl, submitBtn, username) {
+    submitBtn.disabled = true;
+    const end = Date.now() + remainingMs;
+
+    const interval = setInterval(() => {
+      const left = end - Date.now();
+      if (left <= 0) {
+        clearInterval(interval);
+        timerEl.classList.add('hidden');
+        submitBtn.disabled = false;
+        timerEl.textContent = '';
+        return;
+      }
+      timerEl.textContent = `Thử lại sau: ${Security.RateLimiter.formatRemaining(left)}`;
+    }, 1000);
+  }
+
+  /* ─── Navigation / Routing ─── */
+  function navigate(pageId, params = {}) {
+    const page = PAGES[pageId];
+    if (!page) { navigate('dashboard'); return; }
+
+    // Admin-only check
+    if (page.adminOnly && !Auth.isAdmin()) {
+      Utils.showToast('Bạn không có quyền truy cập trang này', 'error');
+      return;
+    }
+
+    _currentPage = pageId;
+
+    // Update active nav
+    document.querySelectorAll('.nav-item').forEach(el => {
+      el.classList.toggle('active', el.dataset.page === pageId);
+    });
+
+    // Update breadcrumb / page title
+    const titleEl = document.getElementById('pageTitle');
+    if (titleEl) titleEl.textContent = page.title;
+
+    // Render page
+    const content = document.getElementById('mainContent');
+    if (content) {
+      content.innerHTML = '<div class="page-loader"><i class="fas fa-spinner fa-spin"></i> Đang tải...</div>';
+    }
+
+    // Small delay for UX
+    setTimeout(() => {
+      try {
+        page.fn(params);
+      } catch (err) {
+        console.error('[App] Page render error:', err);
+        if (content) {
+          content.innerHTML = `<div class="error-state"><i class="fas fa-exclamation-triangle"></i><p>Lỗi tải trang. Vui lòng thử lại.</p></div>`;
+        }
+      }
+    }, 50);
+  }
+
+  /* ─── Global Event Handlers ─── */
+  function setupEventHandlers() {
+    // Sidebar navigation
+    document.addEventListener('click', (e) => {
+      const navItem = e.target.closest('[data-page]');
+      if (navItem && navItem.dataset.page) {
+        e.preventDefault();
+        navigate(navItem.dataset.page);
+        // Close mobile sidebar
+        document.getElementById('sidebar')?.classList.remove('open');
+      }
+
+      // Logout button
+      if (e.target.closest('#logoutBtn')) {
+        e.preventDefault();
+        Utils.Modal.confirm('Bạn có chắc muốn đăng xuất?', () => {
+          Auth.logout();
+          showLogin();
+        });
+      }
+
+      // Mobile sidebar toggle
+      if (e.target.closest('#sidebarToggle')) {
+        document.getElementById('sidebar')?.classList.toggle('open');
+      }
+
+      // Close sidebar on overlay click
+      if (e.target.closest('#sidebarOverlay')) {
+        document.getElementById('sidebar')?.classList.remove('open');
+      }
+
+      // Notification bell
+      if (e.target.closest('#notifBell')) {
+        navigate('notifications');
+      }
+
+      // Modal close buttons
+      const closeModal = e.target.closest('[data-close-modal]');
+      if (closeModal) {
+        Utils.Modal.hide(closeModal.dataset.closeModal);
+      }
+
+      // Modal backdrop click
+      const modal = e.target.closest('.modal');
+      if (modal && e.target === modal) {
+        modal.classList.remove('active');
+        document.body.style.overflow = '';
+      }
+    });
+
+    // Keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+      // Ctrl+K = Search
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        document.getElementById('globalSearch')?.focus();
+      }
+      // Escape = close modals
+      if (e.key === 'Escape') {
+        document.querySelectorAll('.modal.active').forEach(m => {
+          m.classList.remove('active');
+          document.body.style.overflow = '';
+        });
+        document.getElementById('searchResults')?.classList.add('hidden');
+      }
+      // Ctrl+N = New dossier
+      if ((e.ctrlKey || e.metaKey) && e.key === 'n' && Auth.isLoggedIn()) {
+        e.preventDefault();
+        navigate('dossier_new');
+      }
+    });
+  }
+
+  /* ─── Global Search ─── */
+  function setupSearch() {
+    const searchInput  = document.getElementById('globalSearch');
+    const searchResult = document.getElementById('searchResults');
+    if (!searchInput || !searchResult) return;
+
+    searchInput.addEventListener('input', Utils.debounce(() => {
+      const q = Security.Validator.sanitizeQuery(searchInput.value).trim();
+      if (q.length < 2) { searchResult.classList.add('hidden'); return; }
+
+      const result = API.dossiers.list({ search: q }, 'createdAt_desc', 1, 8);
+      if (!result.success || !result.data.length) {
+        searchResult.innerHTML = '<div class="search-item no-result">Không tìm thấy kết quả</div>';
+        searchResult.classList.remove('hidden');
+        return;
+      }
+
+      const html = result.data.map(d => {
+        const sb = Utils.statusBadge(d.status);
+        return `
+          <div class="search-item" data-id="${Security.e(d.id)}">
+            <span class="search-id">${Security.e(d.id)}</span>
+            <span class="search-name">${Utils.highlight(d.projectName, q)}</span>
+            <span class="badge ${Security.e(sb.class)}">${Security.e(sb.label)}</span>
+          </div>`;
+      }).join('');
+
+      searchResult.innerHTML = html;
+      searchResult.classList.remove('hidden');
+
+      // Click kết quả
+      searchResult.querySelectorAll('.search-item[data-id]').forEach(el => {
+        el.addEventListener('click', () => {
+          searchInput.value = '';
+          searchResult.classList.add('hidden');
+          navigate('dossiers');
+          setTimeout(() => PageDossiers.openDetail(el.dataset.id), 100);
+        });
+      });
+    }, 350));
+
+    // Click ngoài để đóng
+    document.addEventListener('click', (e) => {
+      if (!searchInput.contains(e.target) && !searchResult.contains(e.target)) {
+        searchResult.classList.add('hidden');
+      }
+    });
+  }
+
+  /* ─── Notification Badge ─── */
+  function loadNotificationBadge() {
+    const user = Auth.getCurrentUser();
+    if (!user) return;
+    const count  = DB.notifications.getUnreadCount(user.id);
+    const badge  = document.getElementById('notifBadge');
+    if (badge) {
+      badge.textContent = count > 9 ? '9+' : count;
+      badge.style.display = count > 0 ? 'flex' : 'none';
     }
   }
-}
 
-/* ---- SIMULATED REAL-TIME ---- */
-function startRealtimeSimulation() {
-  setInterval(() => {
-    updateNotifBadge();
-    // Update badge counts
-    const total = DB.dossiers.filter(d=>!d.is_deleted).length;
-    const badgeDossiers = document.getElementById('badgeDossiers');
-    if (badgeDossiers) badgeDossiers.textContent = total;
-  }, 10000);
-}
-
-/* ---- INIT ---- */
-document.addEventListener('DOMContentLoaded', () => {
-  // Enter key login
-  document.getElementById('loginPassword')?.addEventListener('keydown', e => {
-    if (e.key === 'Enter') doLogin();
-  });
-  document.getElementById('loginUsername')?.addEventListener('keydown', e => {
-    if (e.key === 'Enter') doLogin();
-  });
-
-  // Check saved session
-  if (Auth.init()) {
-    showApp();
-    checkDeadlineAlerts();
-  } else {
-    document.getElementById('loginPage').style.display = 'flex';
-    document.getElementById('mainApp').style.display = 'none';
+  /* ─── Deadline Checker ─── */
+  function startDeadlineChecker() {
+    const check = () => {
+      if (!Auth.isLoggedIn()) return;
+      const overdue = DB.stats.overdue();
+      if (overdue.length > 0) {
+        const badge = document.getElementById('overdueBadge');
+        if (badge) {
+          badge.textContent = overdue.length;
+          badge.style.display = 'flex';
+        }
+      }
+    };
+    check();
+    setInterval(check, 5 * 60 * 1000); // check mỗi 5 phút
   }
 
-  startRealtimeSimulation();
-});
+  /* ─── Public ─── */
+  return {
+    init,
+    navigate,
+    showLogin,
+    showApp,
+    loadNotificationBadge,
+    getCurrentPage: () => _currentPage,
+    PAGES
+  };
+})();
 
-/* ---- WINDOW RESIZE ---- */
-window.addEventListener('resize', () => {
-  if (window.innerWidth > 768) {
-    document.getElementById('sidebar')?.classList.remove('mobile-open');
-  }
-});
+window.App = App;
+
+// Khởi động khi DOM sẵn sàng
+document.addEventListener('DOMContentLoaded', () => App.init());

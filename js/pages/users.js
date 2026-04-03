@@ -1,187 +1,274 @@
-/* ===========================
-   User Management Page (Admin only)
-   =========================== */
+/**
+ * users.js - Quản lý người dùng (Admin only)
+ */
 
-window.UsersPage = {
-  async render() {
-    if (!Auth.isAdmin) {
-      document.getElementById('pageContainer').innerHTML = `<div class="empty-state"><i class="fas fa-lock"></i><h3>Không có quyền truy cập</h3><p>Chỉ Admin mới có thể quản lý người dùng.</p></div>`;
+const PageUsers = (() => {
+  'use strict';
+  const e = Security.e;
+
+  function render() {
+    if (!Auth.isAdmin()) {
+      document.getElementById('mainContent').innerHTML = `<div class="empty-state"><i class="fas fa-lock"></i><p>Chỉ admin mới truy cập được trang này</p></div>`;
       return;
     }
-    document.getElementById('pageContainer').innerHTML = `<div class="loading"><div class="spinner"></div></div>`;
-    const users = await API.getUsers();
-    this._render(users);
-  },
 
-  _render(users) {
-    const roleGroups = {
-      admin: users.filter(u=>u.role==='admin'),
-      telecom_staff: users.filter(u=>u.role==='telecom_staff'),
-      business_staff: users.filter(u=>u.role==='business_staff'),
-      accounting_staff: users.filter(u=>u.role==='accounting_staff'),
-    };
+    const result = API.users.list();
+    if (!result.success) { Utils.showToast(result.error, 'error'); return; }
+    const users = result.data;
 
-    document.getElementById('pageContainer').innerHTML = `
-      <div class="page-header">
-        <div>
-          <div class="page-title"><i class="fas fa-users-cog" style="color:var(--primary)"></i> Quản lý Người dùng</div>
-          <div class="page-subtitle">Tổng cộng ${users.length} người dùng trong hệ thống</div>
-        </div>
-        <button class="btn btn-primary" onclick="UsersPage.openCreateUser()"><i class="fas fa-user-plus"></i> Thêm người dùng</button>
-      </div>
+    const html = `
+<div class="users-page">
+  <div class="page-header">
+    <h1 class="page-title"><i class="fas fa-users me-2"></i>Quản lý Người dùng</h1>
+    <button class="btn btn-primary" onclick="PageUsers.openForm(null)">
+      <i class="fas fa-user-plus me-1"></i>Thêm người dùng
+    </button>
+  </div>
 
-      <!-- STATS -->
-      <div class="stats-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:24px">
-        ${Object.entries(roleGroups).map(([role,list])=>`
-          <div class="stat-card ${role==='admin'?'primary':role==='telecom_staff'?'info':role==='business_staff'?'warning':'success'}">
-            <div class="stat-icon"><i class="fas ${role==='admin'?'fa-crown':role==='telecom_staff'?'fa-broadcast-tower':role==='business_staff'?'fa-briefcase':'fa-calculator'}"></i></div>
-            <div class="stat-info"><div class="stat-value">${list.length}</div><div class="stat-label">${ROLE_LABELS[role]}</div></div>
-          </div>`).join('')}
-      </div>
+  <div class="card">
+    <div class="card-header">
+      <span>Tổng cộng: <strong>${e(String(users.length))}</strong> tài khoản</span>
+    </div>
+    <div class="card-body p-0">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Avatar</th>
+            <th>Họ tên / Username</th>
+            <th>Email</th>
+            <th>Vai trò</th>
+            <th>Phòng ban</th>
+            <th>Trạng thái</th>
+            <th>Đăng nhập cuối</th>
+            <th>Thao tác</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${users.map(u => renderRow(u)).join('')}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
 
-      <!-- USER GROUPS -->
-      ${Object.entries(roleGroups).map(([role,list])=>list.length?`
-        <div class="mb-24">
-          <div style="font-size:13px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)">
-            <i class="fas fa-circle" style="color:var(--primary);font-size:8px;margin-right:8px"></i>${ROLE_LABELS[role]}
-          </div>
-          <div class="users-grid">
-            ${list.map(u=>this._renderUserCard(u)).join('')}
-          </div>
-        </div>`:''
-      ).join('')}
-    `;
-  },
+<!-- User Form Modal -->
+<div id="userFormModal" class="modal">
+  <div class="modal-dialog">
+    <div class="modal-header">
+      <h3 id="userFormTitle">Thêm người dùng</h3>
+      <button class="modal-close" data-close-modal="userFormModal">×</button>
+    </div>
+    <div class="modal-body">
+      <div id="userForm"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" data-close-modal="userFormModal">Hủy</button>
+      <button id="userFormSubmitBtn" class="btn btn-primary" onclick="PageUsers.submitForm()">
+        <i class="fas fa-save me-1"></i>Lưu
+      </button>
+    </div>
+  </div>
+</div>
 
-  _renderUserCard(u) {
-    const dossierCount = DB.dossiers.filter(d=>!d.is_deleted&&(d.created_by_id===u.id||d.assigned_to_id===u.id)).length;
-    return `
-      <div class="user-card">
-        <div class="user-card-avatar">${u.avatar||Utils.getInitials(u.full_name)}</div>
-        <div class="user-card-info">
-          <div class="user-card-name">${u.full_name}</div>
-          <div class="user-card-email"><i class="fas fa-envelope" style="font-size:10px;margin-right:4px"></i>${u.email}</div>
-          <div class="user-card-meta">
-            ${Utils.roleBadge(u.role)}
-            <span class="badge" style="background:var(--surface-2);color:var(--text-secondary)">${Utils.deptLabel(u.department)}</span>
-            <span style="font-size:11px;color:var(--text-muted)">${dossierCount} hồ sơ</span>
-          </div>
-        </div>
-        <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0">
-          <button class="btn btn-xs btn-secondary" onclick="UsersPage.openEditUser('${u.id}')"><i class="fas fa-edit"></i></button>
-          ${u.id !== Auth.userId ? `<button class="btn btn-xs btn-danger" onclick="UsersPage.deactivateUser('${u.id}','${Utils.escapeHtml(u.full_name)}')"><i class="fas fa-ban"></i></button>` : ''}
-          <div class="badge ${u.is_active?'badge-approved':'badge-archived'}" style="font-size:9px">${u.is_active?'Active':'Inactive'}</div>
-        </div>
-      </div>`;
-  },
+<!-- Confirm Modal -->
+<div id="confirmModal" class="modal">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-header"><h3>Xác nhận</h3></div>
+    <div class="modal-body"><p id="confirmMessage"></p></div>
+    <div class="modal-footer">
+      <button id="confirmCancel" class="btn btn-secondary" onclick="Utils.Modal.hide('confirmModal')">Hủy</button>
+      <button id="confirmOk" class="btn btn-danger">Xác nhận</button>
+    </div>
+  </div>
+</div>`;
 
-  openCreateUser() {
-    document.getElementById('modalUserTitle').textContent = 'Thêm người dùng mới';
-    document.getElementById('modalUserBody').innerHTML = this._userForm();
-    openModal('modalUser');
-  },
-
-  openEditUser(id) {
-    const u = DB.users.find(x=>x.id===id);
-    if (!u) return;
-    document.getElementById('modalUserTitle').textContent = 'Chỉnh sửa người dùng';
-    document.getElementById('modalUserBody').innerHTML = this._userForm(u);
-    openModal('modalUser');
-  },
-
-  _userForm(u={}) {
-    return `
-      <div class="form-group">
-        <label>Họ và tên *</label>
-        <input type="text" id="uFullName" value="${u.full_name||''}" placeholder="Nguyễn Văn A" required />
-      </div>
-      <div class="form-group">
-        <label>Tên đăng nhập *</label>
-        <input type="text" id="uUsername" value="${u.username||''}" placeholder="nguyenvana" ${u.id?'readonly':''} required />
-      </div>
-      <div class="form-group">
-        <label>Email *</label>
-        <input type="email" id="uEmail" value="${u.email||''}" placeholder="email@company.vn" required />
-      </div>
-      <div class="form-group">
-        <label>Mật khẩu ${u.id?'(để trống = không đổi)':' *'}</label>
-        <input type="password" id="uPassword" placeholder="Nhập mật khẩu..." ${u.id?'':'required'} />
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Vai trò *</label>
-          <select id="uRole" onchange="UsersPage.syncDept(this)">
-            <option value="telecom_staff" ${u.role==='telecom_staff'?'selected':''}>Nhân viên Viễn thông</option>
-            <option value="business_staff" ${u.role==='business_staff'?'selected':''}>Nhân viên Kinh doanh</option>
-            <option value="accounting_staff" ${u.role==='accounting_staff'?'selected':''}>Nhân viên Kế toán</option>
-            <option value="admin" ${u.role==='admin'?'selected':''}>Quản trị viên</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label>Phòng ban *</label>
-          <select id="uDept">
-            <option value="vien_thong" ${u.department==='vien_thong'?'selected':''}>Phòng Viễn thông</option>
-            <option value="kinh_doanh" ${u.department==='kinh_doanh'?'selected':''}>Phòng Kinh doanh</option>
-            <option value="ke_toan" ${u.department==='ke_toan'?'selected':''}>Phòng Kế toán</option>
-            <option value="admin" ${u.department==='admin'?'selected':''}>Quản trị</option>
-          </select>
-        </div>
-      </div>
-      <div class="modal-actions">
-        <button class="btn btn-secondary" onclick="closeModal('modalUser')">Hủy</button>
-        <button class="btn btn-primary" onclick="UsersPage.saveUser('${u.id||''}')"><i class="fas fa-save"></i> Lưu</button>
-      </div>`;
-  },
-
-  syncDept(sel) {
-    const roleMap = { telecom_staff:'vien_thong', business_staff:'kinh_doanh', accounting_staff:'ke_toan', admin:'admin' };
-    const dept = roleMap[sel.value];
-    const deptSel = document.getElementById('uDept');
-    if (dept && deptSel) deptSel.value = dept;
-  },
-
-  async saveUser(id) {
-    const payload = {
-      full_name: document.getElementById('uFullName').value.trim(),
-      username: document.getElementById('uUsername').value.trim(),
-      email: document.getElementById('uEmail').value.trim(),
-      role: document.getElementById('uRole').value,
-      department: document.getElementById('uDept').value,
-    };
-    const pwd = document.getElementById('uPassword').value;
-    if (pwd) payload.password = pwd;
-
-    if (!payload.full_name || !payload.username || !payload.email) {
-      return Toast.show('Lỗi','Vui lòng điền đầy đủ thông tin bắt buộc!','error');
-    }
-
-    try {
-      if (id) {
-        await API.updateUser(id, payload);
-        Toast.show('Thành công','Đã cập nhật người dùng!','success');
-      } else {
-        if (!pwd) return Toast.show('Lỗi','Vui lòng nhập mật khẩu!','error');
-        await API.createUser(payload);
-        Toast.show('Thành công','Đã thêm người dùng mới!','success');
-      }
-      closeModal('modalUser');
-      const users = await API.getUsers();
-      this._render(users);
-    } catch(err) {
-      Toast.show('Lỗi', err.message, 'error');
-    }
-  },
-
-  deactivateUser(id, name) {
-    document.getElementById('confirmTitle').textContent = 'Vô hiệu hoá tài khoản?';
-    document.getElementById('confirmMessage').textContent = `Bạn chắc chắn muốn vô hiệu hoá tài khoản của "${name}"?`;
-    document.getElementById('confirmOkBtn').onclick = async () => {
-      await API.deleteUser(id);
-      closeModal('modalConfirm');
-      Toast.show('Thành công','Đã vô hiệu hoá tài khoản!','success');
-      const users = await API.getUsers();
-      this._render(users);
-    };
-    openModal('modalConfirm');
+    document.getElementById('mainContent').innerHTML = html;
   }
-};
+
+  function renderRow(u) {
+    const roleInfo = Auth.ROLES[u.role] || {};
+    const isSelf   = u.id === Auth.getCurrentUser().id;
+    return `
+      <tr>
+        <td>
+          <div class="avatar" style="background:${e(u.color || '#6c757d')};width:36px;height:36px">${e(u.avatar || '?')}</div>
+        </td>
+        <td>
+          <div class="fw-bold">${e(u.displayName)}</div>
+          <div class="text-muted small">@${e(u.username)}</div>
+        </td>
+        <td>${e(u.email || '—')}</td>
+        <td>
+          <span style="color:${e(roleInfo.color || '#6c757d')}">
+            <i class="fas ${e(roleInfo.icon || 'fa-user')} me-1"></i>${e(roleInfo.label || u.role)}
+          </span>
+        </td>
+        <td>${e(Auth.getDeptLabel(u.department))}</td>
+        <td>
+          <span class="badge ${u.active ? 'badge-success' : 'badge-danger'}">
+            ${u.active ? 'Hoạt động' : 'Đã khóa'}
+          </span>
+        </td>
+        <td>${e(Utils.fmt.datetime(u.lastLogin) || '—')}</td>
+        <td>
+          <div class="action-btns">
+            <button class="btn btn-xs btn-warning" onclick="PageUsers.openForm('${e(u.id)}')" title="Sửa">
+              <i class="fas fa-edit"></i>
+            </button>
+            <button class="btn btn-xs ${u.active ? 'btn-secondary' : 'btn-success'}" onclick="PageUsers.toggleActive('${e(u.id)}', ${!u.active})" title="${u.active ? 'Khóa' : 'Mở khóa'}">
+              <i class="fas ${u.active ? 'fa-lock' : 'fa-unlock'}"></i>
+            </button>
+            ${!isSelf ? `
+            <button class="btn btn-xs btn-danger" onclick="PageUsers.deleteUser('${e(u.id)}')" title="Xóa">
+              <i class="fas fa-trash"></i>
+            </button>` : ''}
+          </div>
+        </td>
+      </tr>`;
+  }
+
+  function openForm(id) {
+    const user  = id ? DB.users.getById(id) : null;
+    const title = document.getElementById('userFormTitle');
+    if (title) title.textContent = user ? `Sửa: ${user.displayName}` : 'Thêm người dùng';
+
+    const form = document.getElementById('userForm');
+    if (!form) return;
+
+    form.innerHTML = `
+      <input type="hidden" id="uFormId" value="${e(user?.id || '')}">
+      <div class="form-grid">
+        <div class="form-group">
+          <label class="required">Họ tên</label>
+          <input type="text" id="uDisplayName" class="form-input" value="${e(user?.displayName || '')}" maxlength="100" required placeholder="Nguyễn Văn A">
+        </div>
+        <div class="form-group">
+          <label class="required">Tên đăng nhập</label>
+          <input type="text" id="uUsername" class="form-input" value="${e(user?.username || '')}" maxlength="50" ${user ? 'readonly' : ''} placeholder="nguyen_van_a">
+        </div>
+        <div class="form-group">
+          <label>Email</label>
+          <input type="email" id="uEmail" class="form-input" value="${e(user?.email || '')}" maxlength="100" placeholder="email@company.vn">
+        </div>
+        <div class="form-group">
+          <label>Điện thoại</label>
+          <input type="text" id="uPhone" class="form-input" value="${e(user?.phone || '')}" maxlength="20" placeholder="0901234567">
+        </div>
+        <div class="form-group">
+          <label class="required">Vai trò</label>
+          <select id="uRole" class="form-input">
+            ${Utils.dom.buildOptions([
+              {value:'admin',label:'Quản trị viên'},
+              {value:'telecom',label:'Nhân viên Viễn thông'},
+              {value:'business',label:'Nhân viên Kinh doanh'},
+              {value:'accounting',label:'Nhân viên Kế toán'}
+            ], user?.role, null)}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="required">Phòng ban</label>
+          <select id="uDept" class="form-input">
+            ${Utils.dom.buildOptions([
+              {value:'admin',label:'Ban Quản trị'},
+              {value:'telecom',label:'Phòng Viễn thông'},
+              {value:'business',label:'Phòng Kinh doanh'},
+              {value:'accounting',label:'Phòng Kế toán'}
+            ], user?.department, null)}
+          </select>
+        </div>
+        ${!user ? `
+        <div class="form-group">
+          <label class="required">Mật khẩu</label>
+          <input type="password" id="uPassword" class="form-input" minlength="6" maxlength="100" placeholder="Tối thiểu 6 ký tự" autocomplete="new-password">
+        </div>
+        <div class="form-group">
+          <label class="required">Xác nhận mật khẩu</label>
+          <input type="password" id="uPasswordConfirm" class="form-input" placeholder="Nhập lại mật khẩu" autocomplete="new-password">
+        </div>` : ''}
+        <div class="form-group full-width">
+          <label class="d-flex align-center gap-2">
+            <input type="checkbox" id="uActive" ${(user?.active !== false) ? 'checked' : ''}>
+            Tài khoản đang hoạt động
+          </label>
+        </div>
+      </div>`;
+
+    Utils.Modal.show('userFormModal');
+  }
+
+  async function submitForm() {
+    const id = document.getElementById('uFormId')?.value;
+    const btn = document.getElementById('userFormSubmitBtn');
+
+    const data = {
+      displayName: document.getElementById('uDisplayName')?.value || '',
+      username:    document.getElementById('uUsername')?.value    || '',
+      email:       document.getElementById('uEmail')?.value       || '',
+      phone:       document.getElementById('uPhone')?.value       || '',
+      role:        document.getElementById('uRole')?.value        || '',
+      department:  document.getElementById('uDept')?.value        || '',
+      active:      document.getElementById('uActive')?.checked    ?? true
+    };
+
+    Utils.dom.setLoading(btn, true);
+
+    let result;
+    if (id) {
+      result = API.users.update(id, data);
+    } else {
+      const password = document.getElementById('uPassword')?.value || '';
+      const confirm  = document.getElementById('uPasswordConfirm')?.value || '';
+      if (password !== confirm) {
+        Utils.showToast('Mật khẩu xác nhận không khớp', 'error');
+        Utils.dom.setLoading(btn, false);
+        return;
+      }
+      result = await API.users.create({ ...data, password });
+    }
+
+    Utils.dom.setLoading(btn, false);
+
+    if (result.ok !== undefined) {
+      // register returns {ok, user/reason}
+      if (!result.ok) { Utils.showToast(result.reason, 'error'); return; }
+      Utils.showToast('Đã tạo tài khoản mới!', 'success');
+    } else if (result.success) {
+      Utils.showToast('Đã cập nhật!', 'success');
+    } else {
+      Utils.showToast(result.error || 'Lỗi', 'error'); return;
+    }
+
+    Utils.Modal.hide('userFormModal');
+    render();
+  }
+
+  function toggleActive(id, active) {
+    const result = API.users.update(id, { active });
+    if (result.success) {
+      Utils.showToast(active ? 'Đã mở khóa tài khoản' : 'Đã khóa tài khoản', 'success');
+      render();
+    } else {
+      Utils.showToast(result.error, 'error');
+    }
+  }
+
+  function deleteUser(id) {
+    const user = DB.users.getById(id);
+    Utils.Modal.confirm(
+      `Xóa tài khoản "${user?.displayName || id}"? Hành động này không thể hoàn tác.`,
+      () => {
+        const result = API.users.delete(id);
+        if (result.success) {
+          Utils.showToast('Đã xóa tài khoản', 'success');
+          render();
+        } else {
+          Utils.showToast(result.error, 'error');
+        }
+      }
+    );
+  }
+
+  return { render, openForm, submitForm, toggleActive, deleteUser };
+})();
+
+window.PageUsers = PageUsers;
