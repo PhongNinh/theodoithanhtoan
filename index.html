@@ -1,243 +1,310 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta charset="UTF-8">
+  <!-- Security Headers (CSP, X-Frame, Referrer) - sẽ được security.js inject thêm -->
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <meta name="robots" content="noindex, nofollow">
   <title>PayTrack Pro – Hệ thống Quản lý Hồ sơ Thanh toán</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📋</text></svg>" />
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
-  <link rel="stylesheet" href="css/style.css" />
+
+  <!-- Favicon -->
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💳</text></svg>">
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+  <!-- Icons -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css">
+
+  <!-- App Styles -->
+  <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 
-<!-- =================== LOGIN PAGE =================== -->
-<div id="loginPage" class="login-page">
-  <div class="login-bg-shapes">
-    <div class="shape shape-1"></div>
-    <div class="shape shape-2"></div>
-    <div class="shape shape-3"></div>
+<!-- ═══════════════════════════════════════════════════ -->
+<!--                   LOGIN PAGE                       -->
+<!-- ═══════════════════════════════════════════════════ -->
+<div id="loginPage">
+  <div class="login-bg">
+    <div class="login-shape s1"></div>
+    <div class="login-shape s2"></div>
+    <div class="login-shape s3"></div>
   </div>
+
   <div class="login-container">
+    <!-- Logo / Brand -->
     <div class="login-brand">
-      <div class="brand-icon"><i class="fas fa-file-invoice-dollar"></i></div>
-      <h1>PayTrack Pro</h1>
-      <p>Hệ thống Quản lý Hồ sơ Thanh toán</p>
+      <div class="brand-icon">
+        <i class="fas fa-shield-alt"></i>
+      </div>
+      <h1 class="brand-name">PayTrack <span>Pro</span></h1>
+      <p class="brand-subtitle">Hệ thống Quản lý Hồ sơ Thanh toán</p>
     </div>
+
+    <!-- Security badge -->
+    <div class="security-badge">
+      <i class="fas fa-lock me-1"></i>
+      Kết nối được bảo mật · SHA-256 · Rate Limited
+    </div>
+
+    <!-- Login Form Card -->
     <div class="login-card">
-      <h2>Đăng nhập</h2>
-      <div class="login-error" id="loginError" style="display:none"></div>
-      <form onsubmit="doLogin();return false;" autocomplete="on">
-      <div class="form-group">
-        <label><i class="fas fa-user"></i> Tên đăng nhập</label>
-        <input type="text" id="loginUsername" placeholder="Nhập tên đăng nhập..." autocomplete="username" />
-      </div>
-      <div class="form-group">
-        <label><i class="fas fa-lock"></i> Mật khẩu</label>
-        <div class="password-wrapper">
-          <input type="password" id="loginPassword" placeholder="Nhập mật khẩu..." autocomplete="current-password" />
-          <button type="button" class="toggle-pwd" onclick="togglePwd()"><i class="fas fa-eye" id="eyeIcon"></i></button>
+      <h2 class="login-title">Đăng nhập hệ thống</h2>
+
+      <!-- Error message -->
+      <div id="loginError" class="alert alert-danger hidden" role="alert"></div>
+      <div id="lockoutTimer" class="alert alert-warning hidden" role="alert"></div>
+
+      <form id="loginForm" autocomplete="on" novalidate>
+        <div class="form-group mb-3">
+          <label for="loginUsername" class="form-label">Tên đăng nhập</label>
+          <div class="input-icon-wrap">
+            <i class="fas fa-user input-icon"></i>
+            <input
+              type="text"
+              id="loginUsername"
+              class="form-input with-icon"
+              placeholder="Nhập tên đăng nhập"
+              autocomplete="username"
+              maxlength="50"
+              spellcheck="false"
+              required>
+          </div>
         </div>
-      </div>
-      <button type="submit" class="btn-login" id="loginBtn">
-        <i class="fas fa-sign-in-alt"></i> Đăng nhập
-      </button>
+
+        <div class="form-group mb-4">
+          <label for="loginPassword" class="form-label">Mật khẩu</label>
+          <div class="input-icon-wrap">
+            <i class="fas fa-lock input-icon"></i>
+            <input
+              type="password"
+              id="loginPassword"
+              class="form-input with-icon with-btn"
+              placeholder="Nhập mật khẩu"
+              autocomplete="current-password"
+              maxlength="100"
+              required>
+            <button type="button" id="togglePassword" class="input-toggle" tabindex="-1" title="Hiển thị mật khẩu">
+              <i class="fas fa-eye"></i>
+            </button>
+          </div>
+        </div>
+
+        <button type="submit" id="loginBtn" class="btn btn-primary btn-full btn-lg">
+          <i class="fas fa-sign-in-alt me-2"></i>Đăng nhập
+        </button>
       </form>
-      <div class="login-demo-accounts">
-        <p>Tài khoản demo — click để điền:</p>
+
+      <!-- Demo Accounts -->
+      <div class="demo-accounts">
+        <div class="demo-label">
+          <span>— Tài khoản demo (click để điền) —</span>
+        </div>
         <div class="demo-grid">
-          <button onclick="fillDemo('admin','admin123')" class="demo-btn admin-demo"><i class="fas fa-crown"></i> Admin</button>
-          <button onclick="fillDemo('vt_tuan','123456')" class="demo-btn telecom-demo"><i class="fas fa-broadcast-tower"></i> Viễn thông</button>
-          <button onclick="fillDemo('kd_minh','123456')" class="demo-btn biz-demo"><i class="fas fa-briefcase"></i> Kinh doanh</button>
-          <button onclick="fillDemo('kt_hung','123456')" class="demo-btn acc-demo"><i class="fas fa-calculator"></i> Kế toán</button>
+          <button class="demo-account demo-admin" data-user="admin" data-pass="admin123">
+            <i class="fas fa-crown me-1"></i>Admin
+          </button>
+          <button class="demo-account demo-telecom" data-user="vt_tuan" data-pass="123456">
+            <i class="fas fa-network-wired me-1"></i>Viễn thông
+          </button>
+          <button class="demo-account demo-business" data-user="kd_minh" data-pass="123456">
+            <i class="fas fa-briefcase me-1"></i>Kinh doanh
+          </button>
+          <button class="demo-account demo-accounting" data-user="kt_hung" data-pass="123456">
+            <i class="fas fa-calculator me-1"></i>Kế toán
+          </button>
         </div>
       </div>
+    </div>
+
+    <!-- Security info -->
+    <div class="login-footer">
+      <p>Bảo vệ bởi PayTrack Security Module v2.0</p>
+      <p class="text-muted small">XSS Protection · Brute-force Prevention · Session Monitoring · CSP</p>
     </div>
   </div>
 </div>
 
-<!-- =================== MAIN APP =================== -->
-<div id="mainApp" style="display:none" class="app-layout">
+<!-- ═══════════════════════════════════════════════════ -->
+<!--                   MAIN APP                         -->
+<!-- ═══════════════════════════════════════════════════ -->
+<div id="appPage" class="hidden">
 
-  <!-- SIDEBAR -->
-  <aside class="sidebar" id="sidebar">
-    <div class="sidebar-header">
-      <div class="brand-mini">
-        <div class="brand-icon-sm"><i class="fas fa-file-invoice-dollar"></i></div>
-        <span class="brand-name">PayTrack Pro</span>
+  <!-- Sidebar Overlay (mobile) -->
+  <div id="sidebarOverlay" class="sidebar-overlay"></div>
+
+  <!-- ── SIDEBAR ── -->
+  <aside id="sidebar" class="sidebar">
+
+    <!-- Brand -->
+    <div class="sidebar-brand">
+      <div class="sidebar-logo">
+        <i class="fas fa-shield-alt"></i>
       </div>
-      <button class="sidebar-toggle" onclick="toggleSidebar()"><i class="fas fa-bars"></i></button>
+      <div class="sidebar-brand-text">
+        <div class="sidebar-brand-name">PayTrack Pro</div>
+        <div class="sidebar-brand-sub">v2.0 Secure</div>
+      </div>
     </div>
 
+    <!-- User Card -->
     <div class="sidebar-user">
-      <div class="user-avatar" id="sidebarAvatar">NA</div>
-      <div class="user-info">
-        <div class="user-name" id="sidebarName">Nguyễn Admin</div>
-        <div class="user-role" id="sidebarRole">Admin</div>
+      <div id="userAvatar" class="avatar avatar-md">?</div>
+      <div class="sidebar-user-info">
+        <div id="userName" class="user-name">Loading...</div>
+        <div id="userRole" class="user-role">—</div>
       </div>
     </div>
 
+    <!-- Navigation -->
     <nav class="sidebar-nav">
+
+      <!-- TỔNG QUAN -->
       <div class="nav-section-label">TỔNG QUAN</div>
-      <a href="#" class="nav-item active" data-page="dashboard" onclick="navigate('dashboard',this)">
-        <i class="fas fa-tachometer-alt"></i><span>Dashboard</span>
-      </a>
+      <button class="nav-item" data-page="dashboard">
+        <i class="fas fa-tachometer-alt nav-icon"></i>
+        <span>Dashboard</span>
+      </button>
 
+      <!-- HỒ SƠ -->
       <div class="nav-section-label">HỒ SƠ</div>
-      <a href="#" class="nav-item" data-page="dossiers" onclick="navigate('dossiers',this)">
-        <i class="fas fa-folder-open"></i><span>Danh sách Hồ sơ</span>
-        <span class="nav-badge" id="badgeDossiers">8</span>
-      </a>
-      <a href="#" class="nav-item" data-page="kanban" onclick="navigate('kanban',this)">
-        <i class="fas fa-columns"></i><span>Kanban Board</span>
-      </a>
-      <a href="#" class="nav-item" data-page="create" onclick="navigate('create',this)" id="navCreate">
-        <i class="fas fa-plus-circle"></i><span>Tạo Hồ sơ mới</span>
-      </a>
+      <button class="nav-item" data-page="dossiers">
+        <i class="fas fa-folder-open nav-icon"></i>
+        <span>Danh sách Hồ sơ</span>
+        <span id="dossierCount" class="nav-badge">0</span>
+      </button>
+      <button class="nav-item" data-page="kanban" id="navKanban">
+        <i class="fas fa-columns nav-icon"></i>
+        <span>Kanban Board</span>
+      </button>
+      <button class="nav-item" data-page="dossier_new" id="navCreateDossier">
+        <i class="fas fa-plus nav-icon"></i>
+        <span>Tạo Hồ sơ mới</span>
+      </button>
 
+      <!-- THEO DÕI -->
       <div class="nav-section-label">THEO DÕI</div>
-      <a href="#" class="nav-item" data-page="audit" onclick="navigate('audit',this)">
-        <i class="fas fa-history"></i><span>Audit Log</span>
-      </a>
-      <a href="#" class="nav-item" data-page="notifications" onclick="navigate('notifications',this)">
-        <i class="fas fa-bell"></i><span>Thông báo</span>
-        <span class="nav-badge pulse" id="badgeNotif">3</span>
-      </a>
+      <button class="nav-item" data-page="notifications">
+        <i class="fas fa-bell nav-icon"></i>
+        <span>Thông báo</span>
+      </button>
+      <button class="nav-item" data-page="audit">
+        <i class="fas fa-history nav-icon"></i>
+        <span>Audit Log</span>
+      </button>
 
+      <!-- BÁO CÁO -->
       <div class="nav-section-label">BÁO CÁO</div>
-      <a href="#" class="nav-item" data-page="reports" onclick="navigate('reports',this)">
-        <i class="fas fa-chart-bar"></i><span>Báo cáo & Xuất Excel</span>
-      </a>
+      <button class="nav-item" data-page="reports">
+        <i class="fas fa-chart-bar nav-icon"></i>
+        <span>Báo cáo & Xuất</span>
+      </button>
 
-      <div class="nav-section-label admin-only" id="adminNavLabel">QUẢN TRỊ</div>
-      <a href="#" class="nav-item admin-only" data-page="users" onclick="navigate('users',this)" id="navUsers">
-        <i class="fas fa-users-cog"></i><span>Quản lý Người dùng</span>
-      </a>
-      <a href="#" class="nav-item admin-only" data-page="settings" onclick="navigate('settings',this)" id="navSettings">
-        <i class="fas fa-cog"></i><span>Cài đặt Hệ thống</span>
-      </a>
+      <!-- QUẢN TRỊ (admin only) -->
+      <div class="nav-section-label admin-only">QUẢN TRỊ</div>
+      <button class="nav-item admin-only" data-page="users">
+        <i class="fas fa-users nav-icon"></i>
+        <span>Quản lý Người dùng</span>
+      </button>
+      <button class="nav-item admin-only" data-page="security">
+        <i class="fas fa-shield-alt nav-icon"></i>
+        <span>Trung tâm Bảo mật</span>
+      </button>
+      <button class="nav-item admin-only" data-page="settings">
+        <i class="fas fa-cog nav-icon"></i>
+        <span>Cài đặt Hệ thống</span>
+      </button>
     </nav>
 
+    <!-- Logout -->
     <div class="sidebar-footer">
-      <button class="btn-logout" onclick="doLogout()"><i class="fas fa-sign-out-alt"></i><span>Đăng xuất</span></button>
+      <button id="logoutBtn" class="btn-logout">
+        <i class="fas fa-sign-out-alt me-2"></i>Đăng xuất
+      </button>
     </div>
   </aside>
 
-  <!-- MAIN CONTENT -->
-  <div class="main-content" id="mainContent">
-    <!-- TOP BAR -->
+  <!-- ── MAIN AREA ── -->
+  <div class="main-area">
+
+    <!-- Top Bar -->
     <header class="topbar">
       <div class="topbar-left">
-        <button class="mobile-menu-btn" onclick="toggleSidebar()"><i class="fas fa-bars"></i></button>
-        <div class="breadcrumb" id="breadcrumb">Dashboard</div>
+        <button id="sidebarToggle" class="sidebar-toggle" title="Toggle sidebar">
+          <i class="fas fa-bars"></i>
+        </button>
+        <div class="breadcrumb">
+          <i class="fas fa-home text-muted me-1"></i>
+          <span id="pageTitle" class="breadcrumb-current">Dashboard</span>
+        </div>
       </div>
+
       <div class="topbar-right">
-        <div class="search-bar">
-          <i class="fas fa-search"></i>
-          <input type="text" id="globalSearch" placeholder="Tìm hồ sơ, dự án..." oninput="globalSearchHandler()" />
+        <!-- Global Search -->
+        <div class="search-wrap">
+          <i class="fas fa-search search-icon"></i>
+          <input
+            type="text"
+            id="globalSearch"
+            class="search-input"
+            placeholder="Tìm hồ sơ... (Ctrl+K)"
+            maxlength="100"
+            autocomplete="off"
+            spellcheck="false">
+          <div id="searchResults" class="search-results hidden"></div>
         </div>
-        <div class="topbar-notif" onclick="navigate('notifications',null)">
+
+        <!-- Overdue badge -->
+        <div id="overdueBadge" class="overdue-badge hidden" title="Hồ sơ quá hạn" onclick="App.navigate('reports')">
+          <i class="fas fa-exclamation-triangle"></i>
+          <span>0</span>
+        </div>
+
+        <!-- Notification Bell -->
+        <button id="notifBell" class="topbar-icon-btn" title="Thông báo">
           <i class="fas fa-bell"></i>
-          <span class="notif-dot" id="notifDot"></span>
-        </div>
-        <div class="topbar-user" onclick="toggleUserMenu()">
-          <div class="topbar-avatar" id="topbarAvatar">NA</div>
-          <span id="topbarName">Admin</span>
-          <i class="fas fa-chevron-down"></i>
-          <div class="user-dropdown" id="userDropdown">
-            <div class="dropdown-header">
-              <strong id="ddName">Nguyễn Admin</strong>
-              <small id="ddRole">Admin</small>
-            </div>
-            <a href="#" onclick="navigate('settings',null)"><i class="fas fa-user-circle"></i> Hồ sơ cá nhân</a>
-            <a href="#" onclick="doLogout()"><i class="fas fa-sign-out-alt"></i> Đăng xuất</a>
-          </div>
-        </div>
+          <span id="notifBadge" class="notif-badge hidden">0</span>
+        </button>
+
+        <!-- Settings -->
+        <button class="topbar-icon-btn" data-page="settings" title="Cài đặt">
+          <i class="fas fa-cog"></i>
+        </button>
       </div>
     </header>
 
-    <!-- PAGE CONTAINER -->
-    <div class="page-container" id="pageContainer">
-      <!-- Pages injected by JS -->
-    </div>
-  </div>
-</div>
-
-<!-- ============ MODALS ============ -->
-
-<!-- Dossier Detail Modal -->
-<div class="modal-overlay" id="modalDossierDetail" onclick="closeModalOverlay(event,'modalDossierDetail')">
-  <div class="modal-box modal-xl">
-    <div class="modal-header">
-      <h3 id="modalDetailTitle">Chi tiết Hồ sơ</h3>
-      <button class="modal-close" onclick="closeModal('modalDossierDetail')"><i class="fas fa-times"></i></button>
-    </div>
-    <div class="modal-body" id="modalDetailBody"></div>
-  </div>
-</div>
-
-<!-- Status Change Modal -->
-<div class="modal-overlay" id="modalStatusChange" onclick="closeModalOverlay(event,'modalStatusChange')">
-  <div class="modal-box modal-sm">
-    <div class="modal-header">
-      <h3>Chuyển trạng thái Hồ sơ</h3>
-      <button class="modal-close" onclick="closeModal('modalStatusChange')"><i class="fas fa-times"></i></button>
-    </div>
-    <div class="modal-body" id="modalStatusBody"></div>
-  </div>
-</div>
-
-<!-- Create/Edit Dossier Modal -->
-<div class="modal-overlay" id="modalCreateDossier" onclick="closeModalOverlay(event,'modalCreateDossier')">
-  <div class="modal-box modal-lg">
-    <div class="modal-header">
-      <h3 id="modalCreateTitle">Tạo Hồ sơ Thanh toán mới</h3>
-      <button class="modal-close" onclick="closeModal('modalCreateDossier')"><i class="fas fa-times"></i></button>
-    </div>
-    <div class="modal-body" id="modalCreateBody"></div>
-  </div>
-</div>
-
-<!-- Confirm Modal -->
-<div class="modal-overlay" id="modalConfirm" onclick="closeModalOverlay(event,'modalConfirm')">
-  <div class="modal-box modal-xs">
-    <div class="modal-header">
-      <h3 id="confirmTitle">Xác nhận</h3>
-      <button class="modal-close" onclick="closeModal('modalConfirm')"><i class="fas fa-times"></i></button>
-    </div>
-    <div class="modal-body">
-      <p id="confirmMessage"></p>
-      <div class="modal-actions">
-        <button class="btn btn-secondary" onclick="closeModal('modalConfirm')">Hủy</button>
-        <button class="btn btn-danger" id="confirmOkBtn">Xác nhận</button>
+    <!-- Page Content -->
+    <main id="mainContent" class="main-content">
+      <div class="page-loader">
+        <i class="fas fa-spinner fa-spin"></i>
+        <span>Đang khởi tạo...</span>
       </div>
-    </div>
+    </main>
   </div>
 </div>
 
-<!-- User Create/Edit Modal -->
-<div class="modal-overlay" id="modalUser" onclick="closeModalOverlay(event,'modalUser')">
-  <div class="modal-box modal-sm">
-    <div class="modal-header">
-      <h3 id="modalUserTitle">Thêm người dùng</h3>
-      <button class="modal-close" onclick="closeModal('modalUser')"><i class="fas fa-times"></i></button>
-    </div>
-    <div class="modal-body" id="modalUserBody"></div>
-  </div>
-</div>
+<!-- Toast Container -->
+<div id="toastContainer" class="toast-container" aria-live="polite"></div>
 
-<!-- Toast Notification -->
-<div class="toast-container" id="toastContainer"></div>
+<!-- ═══════════════════════════════════════════════════ -->
+<!--                  JAVASCRIPT                        -->
+<!-- ═══════════════════════════════════════════════════ -->
 
-<!-- Global Search Results -->
-<div class="search-results-dropdown" id="searchResults" style="display:none"></div>
+<!-- Libraries -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
 
+<!-- Core (order matters!) -->
+<script src="js/security.js"></script>
 <script src="js/data.js"></script>
 <script src="js/auth.js"></script>
 <script src="js/utils.js"></script>
 <script src="js/api.js"></script>
+
+<!-- Pages -->
 <script src="js/pages/dashboard.js"></script>
 <script src="js/pages/dossiers.js"></script>
 <script src="js/pages/kanban.js"></script>
@@ -246,6 +313,10 @@
 <script src="js/pages/reports.js"></script>
 <script src="js/pages/users.js"></script>
 <script src="js/pages/settings.js"></script>
+<script src="js/pages/security-dashboard.js"></script>
+
+<!-- App Bootstrap (last) -->
 <script src="js/app.js"></script>
+
 </body>
 </html>

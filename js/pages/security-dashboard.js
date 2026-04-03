@@ -6,7 +6,7 @@ const PageSecurity = (() => {
   'use strict';
   const e = Security.e;
 
-  async function render() {
+  function render() {
     if (!Auth.isAdmin()) {
       document.getElementById('mainContent').innerHTML = `<div class="empty-state"><i class="fas fa-lock"></i><p>Chỉ admin mới truy cập được trang này</p></div>`;
       return;
@@ -175,16 +175,16 @@ const PageSecurity = (() => {
     <div class="card-body">
       <div class="security-limits">
         <div class="limit-item">
-          <i class="fas fa-check-circle text-success me-2"></i>
-          <span>Dữ liệu lưu trên server qua RESTful Table API — không còn phụ thuộc localStorage</span>
+          <i class="fas fa-exclamation-circle text-warning me-2"></i>
+          <span>Dữ liệu lưu trong localStorage - không mã hóa hoàn toàn</span>
         </div>
         <div class="limit-item">
           <i class="fas fa-exclamation-circle text-warning me-2"></i>
-          <span>SHA-256 hash client-side — yếu hơn bcrypt server-side nhưng đủ cho môi trường demo</span>
+          <span>SHA-256 hash client-side yếu hơn bcrypt server-side</span>
         </div>
         <div class="limit-item">
           <i class="fas fa-exclamation-circle text-warning me-2"></i>
-          <span>Rate limiting chỉ ngăn brute-force tại UI — không ngăn API calls trực tiếp</span>
+          <span>Rate limiting chỉ ngăn brute-force tại UI - không ngăn API calls trực tiếp</span>
         </div>
         <div class="limit-item">
           <i class="fas fa-info-circle text-info me-2"></i>

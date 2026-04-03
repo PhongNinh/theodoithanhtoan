@@ -1,337 +1,521 @@
-/* ===========================
-   PayTrack Pro - API Layer
-   Simulates backend REST API
-   =========================== */
+/**
+ * api.js - Lớp API nội bộ với validation và bảo mật
+ * PayTrack Pro
+ *
+ * Tất cả dữ liệu vào/ra đều được:
+ * - Validate schema
+ * - Sanitize XSS
+ * - Kiểm tra quyền truy cập (RBAC)
+ * - Audit logged
+ */
 
-window.API = {
-  /* ---- DOSSIERS ---- */
-  async getDossiers(filters={}) {
-    await this._delay(100);
-    let data = [...DB.dossiers];
-    if (!Auth.isAdmin) {
-      data = data.filter(d => Auth.canViewDossier(d));
+const API = (() => {
+  'use strict';
+
+  /* ─── Response helpers ─── */
+  function ok(data, meta = {}) {
+    return { success: true, data, ...meta };
+  }
+
+  function err(message, code = 400) {
+    return { success: false, error: message, code };
+  }
+
+  function authCheck() {
+    if (!Auth.isLoggedIn()) return err('Chưa xác thực. Vui lòng đăng nhập lại', 401);
+    return null;
+  }
+
+  /* ─── Input validation schemas ─── */
+  const schemas = {
+    dossier: {
+      projectName:  { type: 'string', required: true, maxLen: 200 },
+      contractNo:   { type: 'string', required: false, maxLen: 50 },
+      department:   { type: 'enum',   required: true, values: ['telecom', 'business', 'accounting'] },
+      priority:     { type: 'enum',   required: true, values: ['urgent', 'high', 'medium', 'low'] },
+      amount:       { type: 'number', required: true, min: 0, max: 1e12 },
+      deadline:     { type: 'date',   required: false },
+      description:  { type: 'string', required: false, maxLen: 2000 },
+      notes:        { type: 'string', required: false, maxLen: 1000 },
+      assigneeId:   { type: 'string', required: false, maxLen: 50 }
+    },
+    user: {
+      username:     { type: 'string', required: true, maxLen: 50, pattern: /^[a-zA-Z0-9_\.]{3,50}$/ },
+      displayName:  { type: 'string', required: true, maxLen: 100 },
+      email:        { type: 'string', required: false, maxLen: 100 },
+      role:         { type: 'enum',   required: true, values: ['admin', 'telecom', 'business', 'accounting'] },
+      department:   { type: 'enum',   required: true, values: ['admin', 'telecom', 'business', 'accounting'] },
+      password:     { type: 'string', required: true, minLen: 6, maxLen: 100 }
+    },
+    statusChange: {
+      newStatus: { type: 'string', required: true, maxLen: 50 },
+      note:      { type: 'string', required: false, maxLen: 500 }
+    },
+    comment: {
+      text: { type: 'string', required: true, maxLen: 1000 }
     }
-    return Utils.filterDossiers(data, filters);
-  },
+  };
 
-  async getDossier(id) {
-    await this._delay(80);
-    return DB.dossiers.find(d => d.id === id && !d.is_deleted) || null;
-  },
+  /**
+   * Validate dữ liệu theo schema
+   */
+  function validateSchema(data, schemaName) {
+    const schema = schemas[schemaName];
+    if (!schema) return { valid: true, data };
 
-  async createDossier(payload) {
-    await this._delay(200);
-    const newId = DB.newId();
-    const code = DB.getNextDossierCode();
-    const dossier = {
-      id: newId,
-      dossier_code: code,
-      is_deleted: false,
-      status: 'created',
-      created_by_id: Auth.userId,
-      created_by_name: Auth.user.full_name,
-      created_at: new Date().toISOString(),
-      ...payload
-    };
-    DB.dossiers.push(dossier);
+    const errors = [];
+    const clean  = {};
 
-    // Audit log
-    this._addAuditLog({
-      dossier_id: newId,
-      dossier_code: code,
-      action: 'create',
-      field_changed: 'status',
-      old_value: null,
-      new_value: 'created',
-      comment: `Tạo hồ sơ mới: ${dossier.project_name}`
-    });
+    for (const [field, rules] of Object.entries(schema)) {
+      let value = data[field];
 
-    // Notify assigned user
-    if (payload.assigned_to_id && payload.assigned_to_id !== Auth.userId) {
-      this._addNotification({
-        user_id: payload.assigned_to_id,
-        dossier_id: newId,
-        dossier_code: code,
-        type: 'assignment',
-        title: 'Hồ sơ mới được giao',
-        message: `Hồ sơ ${code} "${dossier.project_name}" đã được giao cho bạn.`,
-        priority: payload.priority || 'medium'
+      // Required check
+      if (rules.required && (value === undefined || value === null || value === '')) {
+        errors.push(`Trường "${field}" là bắt buộc`);
+        continue;
+      }
+
+      if (value === undefined || value === null || value === '') {
+        clean[field] = value;
+        continue;
+      }
+
+      // Type validation
+      switch (rules.type) {
+        case 'string':
+          value = Security.XSS.sanitizeInput(String(value));
+          if (rules.maxLen && value.length > rules.maxLen) {
+            value = value.substring(0, rules.maxLen);
+          }
+          if (rules.minLen && value.length < rules.minLen) {
+            errors.push(`"${field}" cần ít nhất ${rules.minLen} ký tự`);
+          }
+          if (rules.pattern && !rules.pattern.test(value)) {
+            errors.push(`"${field}" không hợp lệ`);
+          }
+          break;
+
+        case 'number':
+          value = parseFloat(value);
+          if (isNaN(value)) { errors.push(`"${field}" phải là số`); continue; }
+          if (rules.min !== undefined && value < rules.min) errors.push(`"${field}" không được nhỏ hơn ${rules.min}`);
+          if (rules.max !== undefined && value > rules.max) errors.push(`"${field}" không được lớn hơn ${rules.max}`);
+          break;
+
+        case 'enum':
+          if (!rules.values.includes(value)) {
+            errors.push(`"${field}" không hợp lệ. Phải là: ${rules.values.join(', ')}`);
+          }
+          break;
+
+        case 'date':
+          if (value && isNaN(new Date(value).getTime())) {
+            errors.push(`"${field}" không phải ngày hợp lệ`);
+          }
+          break;
+
+        case 'bool':
+          value = Boolean(value);
+          break;
+      }
+
+      clean[field] = value;
+    }
+
+    if (errors.length) return { valid: false, errors };
+    return { valid: true, data: clean };
+  }
+
+  /* ─── Dossier API ─── */
+  const dossiers = {
+    /**
+     * Lấy danh sách hồ sơ với filter, sort, pagination
+     */
+    list(filters = {}, sort = 'createdAt_desc', page = 1, limit = 20) {
+      const authErr = authCheck();
+      if (authErr) return authErr;
+
+      let list = DB.dossiers.getAll();
+
+      // Filter theo quyền role
+      const user = Auth.getCurrentUser();
+      if (user.role === 'business') {
+        // Business chỉ thấy dossier của phòng business HOẶC do mình tạo
+        list = list.filter(d => d.creatorId === user.id || d.department === 'business');
+      }
+
+      // Apply filters
+      if (filters.status)     list = list.filter(d => d.status === filters.status);
+      if (filters.department) list = list.filter(d => d.department === filters.department);
+      if (filters.priority)   list = list.filter(d => d.priority === filters.priority);
+      if (filters.assigneeId) list = list.filter(d => d.assigneeId === filters.assigneeId);
+      if (filters.creatorId)  list = list.filter(d => d.creatorId === filters.creatorId);
+      if (filters.search) {
+        const q = Security.Validator.sanitizeQuery(filters.search).toLowerCase();
+        list = list.filter(d =>
+          d.id.toLowerCase().includes(q) ||
+          d.projectName.toLowerCase().includes(q) ||
+          (d.contractNo || '').toLowerCase().includes(q)
+        );
+      }
+      if (filters.dateFrom) list = list.filter(d => d.createdAt >= new Date(filters.dateFrom).getTime());
+      if (filters.dateTo)   list = list.filter(d => d.createdAt <= new Date(filters.dateTo).getTime() + 86400000);
+      if (filters.overdue) {
+        const today = Date.now();
+        list = list.filter(d => d.deadline && new Date(d.deadline).getTime() < today && !['paid', 'archived'].includes(d.status));
+      }
+
+      // Sort
+      const [sortField, sortDir] = sort.split('_');
+      list.sort((a, b) => {
+        let va = a[sortField], vb = b[sortField];
+        if (typeof va === 'string') va = va.toLowerCase();
+        if (typeof vb === 'string') vb = vb.toLowerCase();
+        if (va < vb) return sortDir === 'asc' ? -1 : 1;
+        if (va > vb) return sortDir === 'asc' ? 1 : -1;
+        return 0;
       });
-    }
 
-    return dossier;
-  },
+      const total  = list.length;
+      const offset = (page - 1) * limit;
+      const paged  = list.slice(offset, offset + limit);
 
-  async updateDossier(id, payload) {
-    await this._delay(150);
-    const idx = DB.dossiers.findIndex(d => d.id === id);
-    if (idx === -1) throw new Error('Không tìm thấy hồ sơ');
-    const old = { ...DB.dossiers[idx] };
-    DB.dossiers[idx] = { ...old, ...payload, updated_at: new Date().toISOString() };
+      // Enrich với user info
+      const enriched = paged.map(d => enrichDossier(d));
 
-    // Log changed fields
-    Object.keys(payload).forEach(key => {
-      if (old[key] !== payload[key] && key !== 'updated_at') {
-        this._addAuditLog({
-          dossier_id: id,
-          dossier_code: old.dossier_code,
-          action: 'edit',
-          field_changed: key,
-          old_value: String(old[key] || ''),
-          new_value: String(payload[key] || ''),
-          comment: `Cập nhật trường: ${key}`
+      return ok(enriched, { total, page, limit, totalPages: Math.ceil(total / limit) });
+    },
+
+    /**
+     * Lấy chi tiết một hồ sơ
+     */
+    getById(id) {
+      const authErr = authCheck();
+      if (authErr) return authErr;
+
+      const cleanId = Security.XSS.sanitizeInput(id);
+      const dossier = DB.dossiers.getById(cleanId);
+      if (!dossier) return err('Không tìm thấy hồ sơ', 404);
+      if (!Auth.canViewDossier(dossier)) return err('Không có quyền xem hồ sơ này', 403);
+
+      const enriched = enrichDossier(dossier);
+      enriched.history  = DB.workflow.getHistory(cleanId);
+      enriched.comments = DB.comments.getByDossier(cleanId).map(c => ({
+        ...c,
+        actor: DB.users.getById(c.userId) ? {
+          displayName: DB.users.getById(c.userId).displayName,
+          avatar: DB.users.getById(c.userId).avatar,
+          color:  DB.users.getById(c.userId).color
+        } : null
+      }));
+
+      return ok(enriched);
+    },
+
+    /**
+     * Tạo hồ sơ mới
+     */
+    create(data) {
+      const authErr = authCheck();
+      if (authErr) return authErr;
+
+      if (!Auth.hasPermission('dossier.create') && !Auth.isAdmin()) {
+        return err('Bạn không có quyền tạo hồ sơ', 403);
+      }
+
+      const validation = validateSchema(data, 'dossier');
+      if (!validation.valid) return err(validation.errors.join('; '));
+
+      const user = Auth.getCurrentUser();
+      const dossier = DB.dossiers.create({
+        ...validation.data,
+        creatorId: user.id,
+        tags: Array.isArray(data.tags) ? data.tags.map(t => Security.XSS.sanitizeInput(t)).slice(0, 10) : []
+      });
+
+      DB.auditLogs.log(user.id, 'CREATE_DOSSIER', dossier.id, 'dossier', {
+        projectName: dossier.projectName, amount: dossier.amount
+      });
+
+      // Thông báo cho assignee nếu có
+      if (dossier.assigneeId && dossier.assigneeId !== user.id) {
+        DB.notifications.create({
+          userId: dossier.assigneeId, type: 'new_assignment',
+          title: 'Hồ sơ mới được giao',
+          message: `${dossier.id} - ${dossier.projectName} đã được giao cho bạn`,
+          dossierRef: dossier.id
         });
       }
-    });
 
-    return DB.dossiers[idx];
-  },
+      return ok(enrichDossier(dossier));
+    },
 
-  async changeStatus(id, newStatus, comment='') {
-    await this._delay(200);
-    const idx = DB.dossiers.findIndex(d => d.id === id);
-    if (idx === -1) throw new Error('Không tìm thấy hồ sơ');
-    const dossier = DB.dossiers[idx];
-    const oldStatus = dossier.status;
+    /**
+     * Cập nhật hồ sơ
+     */
+    update(id, data) {
+      const authErr = authCheck();
+      if (authErr) return authErr;
 
-    // Validate transition
-    const allowed = WORKFLOW.allowedTransitions(Auth.role, oldStatus);
-    if (!allowed.includes(newStatus)) {
-      throw new Error(`Không được phép chuyển từ "${STATUS_LABELS[oldStatus]}" sang "${STATUS_LABELS[newStatus]}"`);
-    }
+      const cleanId = Security.XSS.sanitizeInput(id);
+      const dossier = DB.dossiers.getById(cleanId);
+      if (!dossier) return err('Không tìm thấy hồ sơ', 404);
+      if (!Auth.canEditDossier(dossier)) return err('Không có quyền chỉnh sửa hồ sơ này', 403);
 
-    DB.dossiers[idx].status = newStatus;
-    DB.dossiers[idx].updated_at = new Date().toISOString();
+      // Không cho phép thay đổi status qua update thông thường
+      const { status, creatorId, id: _id, createdAt, ...updateData } = data;
 
-    // Audit log
-    this._addAuditLog({
-      dossier_id: id,
-      dossier_code: dossier.dossier_code,
-      action: 'status_change',
-      field_changed: 'status',
-      old_value: oldStatus,
-      new_value: newStatus,
-      comment: comment || `Chuyển trạng thái: ${STATUS_LABELS[oldStatus]} → ${STATUS_LABELS[newStatus]}`
-    });
+      const validation = validateSchema(updateData, 'dossier');
+      if (!validation.valid) return err(validation.errors.join('; '));
 
-    // Notify creator
-    if (dossier.created_by_id !== Auth.userId) {
-      this._addNotification({
-        user_id: dossier.created_by_id,
-        dossier_id: id,
-        dossier_code: dossier.dossier_code,
-        type: 'status_change',
-        title: 'Trạng thái hồ sơ thay đổi',
-        message: `${dossier.dossier_code} đã chuyển sang: ${STATUS_LABELS[newStatus]}`,
-        priority: dossier.priority
+      const user    = Auth.getCurrentUser();
+      const updated = DB.dossiers.update(cleanId, validation.data);
+      DB.auditLogs.log(user.id, 'UPDATE_DOSSIER', cleanId, 'dossier', { fields: Object.keys(validation.data) });
+
+      return ok(enrichDossier(updated));
+    },
+
+    /**
+     * Xóa hồ sơ (soft delete)
+     */
+    delete(id) {
+      const authErr = authCheck();
+      if (authErr) return authErr;
+      if (!Auth.isAdmin()) return err('Chỉ admin mới được xóa hồ sơ', 403);
+
+      const cleanId = Security.XSS.sanitizeInput(id);
+      const dossier = DB.dossiers.getById(cleanId);
+      if (!dossier) return err('Không tìm thấy hồ sơ', 404);
+
+      DB.dossiers.delete(cleanId);
+      DB.auditLogs.log(Auth.getCurrentUser().id, 'DELETE_DOSSIER', cleanId, 'dossier', { projectName: dossier.projectName });
+
+      return ok({ deleted: true });
+    },
+
+    /**
+     * Chuyển trạng thái workflow
+     */
+    transition(id, newStatus, note) {
+      const authErr = authCheck();
+      if (authErr) return authErr;
+
+      const cleanId     = Security.XSS.sanitizeInput(id);
+      const cleanStatus = Security.XSS.sanitizeInput(newStatus);
+      const cleanNote   = Security.XSS.sanitizeInput(note || '');
+
+      const dossier = DB.dossiers.getById(cleanId);
+      if (!dossier) return err('Không tìm thấy hồ sơ', 404);
+
+      if (!Auth.canTransitionDossier(dossier, cleanStatus)) {
+        return err('Bạn không có quyền thực hiện thao tác này với trạng thái hiện tại', 403);
+      }
+
+      const check = DB.workflow.canTransition(dossier.status, cleanStatus, Auth.getCurrentUser().role);
+      if (!check.ok) return err(check.reason, 400);
+
+      const user   = Auth.getCurrentUser();
+      const result = DB.workflow.transition(cleanId, cleanStatus, user.id, cleanNote);
+      if (!result.ok) return err(result.reason);
+
+      DB.auditLogs.log(user.id, 'STATUS_CHANGE', cleanId, 'dossier', {
+        from: dossier.status, to: cleanStatus, note: cleanNote
       });
-    }
 
-    // Notify assigned user when sent to accounting
-    if (newStatus === 'sent_accounting') {
-      DB.users.filter(u => u.role === 'accounting_staff').forEach(u => {
-        this._addNotification({
-          user_id: u.id,
-          dossier_id: id,
-          dossier_code: dossier.dossier_code,
-          type: 'assignment',
-          title: 'Hồ sơ chờ phê duyệt',
-          message: `${dossier.dossier_code} "${dossier.project_name}" đã được chuyển sang Kế toán.`,
-          priority: 'high'
+      // Thông báo
+      const actors = new Set([dossier.creatorId, dossier.assigneeId].filter(Boolean));
+      actors.delete(user.id);
+      actors.forEach(uid => {
+        DB.notifications.create({
+          userId: uid, type: 'status_change',
+          title: 'Trạng thái hồ sơ thay đổi',
+          message: `${dossier.id} - ${dossier.projectName}: ${dossier.status} → ${cleanStatus}`,
+          dossierRef: cleanId
         });
       });
+
+      return ok({ dossier: enrichDossier(DB.dossiers.getById(cleanId)), entry: result.entry });
     }
+  };
 
-    return DB.dossiers[idx];
-  },
+  /* ─── User API ─── */
+  const users = {
+    list() {
+      const authErr = authCheck();
+      if (authErr) return authErr;
+      if (!Auth.isAdmin()) return err('Chỉ admin được xem danh sách người dùng', 403);
 
-  async deleteDossier(id) {
-    await this._delay(150);
-    const idx = DB.dossiers.findIndex(d => d.id === id);
-    if (idx === -1) throw new Error('Không tìm thấy hồ sơ');
-    DB.dossiers[idx].is_deleted = true;
-    this._addAuditLog({
-      dossier_id: id,
-      dossier_code: DB.dossiers[idx].dossier_code,
-      action: 'delete',
-      field_changed: 'is_deleted',
-      old_value: 'false',
-      new_value: 'true',
-      comment: 'Xóa hồ sơ'
-    });
-    return true;
-  },
+      const list = DB.users.getAll().map(u => sanitizeUserOutput(u));
+      return ok(list, { total: list.length });
+    },
 
-  /* ---- AUDIT LOGS ---- */
-  async getAuditLogs(dossierId=null) {
-    await this._delay(80);
-    let logs = [...DB.auditLogs];
-    if (dossierId) logs = logs.filter(l => l.dossier_id === dossierId);
-    return logs.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
-  },
+    getById(id) {
+      const authErr = authCheck();
+      if (authErr) return authErr;
+      const cleanId = Security.XSS.sanitizeInput(id);
+      if (!Auth.isAdmin() && Auth.getCurrentUser().id !== cleanId) {
+        return err('Không có quyền xem thông tin này', 403);
+      }
+      const user = DB.users.getById(cleanId);
+      if (!user) return err('Không tìm thấy người dùng', 404);
+      return ok(sanitizeUserOutput(user));
+    },
 
-  /* ---- COMMENTS ---- */
-  async getComments(dossierId) {
-    await this._delay(60);
-    return DB.comments.filter(c => c.dossier_id === dossierId && !c.is_deleted)
-      .sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
-  },
+    async create(data) {
+      return Auth.register(data);
+    },
 
-  async addComment(dossierId, content, isInternal=false) {
-    await this._delay(150);
-    const dossier = DB.dossiers.find(d => d.id === dossierId);
-    const comment = {
-      id: DB.newId(),
-      dossier_id: dossierId,
-      user_id: Auth.userId,
-      user_name: Auth.user.full_name,
-      user_role: Auth.role,
-      content,
-      is_internal: isInternal,
-      is_deleted: false,
-      created_at: new Date().toISOString()
-    };
-    DB.comments.push(comment);
+    update(id, data) {
+      const authErr = authCheck();
+      if (authErr) return authErr;
+      if (!Auth.isAdmin()) return err('Chỉ admin được cập nhật người dùng', 403);
 
-    this._addAuditLog({
-      dossier_id: dossierId,
-      dossier_code: dossier?.dossier_code || '',
-      action: 'comment',
-      field_changed: 'comments',
-      old_value: '',
-      new_value: Utils.truncate(content, 50),
-      comment: content
-    });
+      const cleanId = Security.XSS.sanitizeInput(id);
+      const user = DB.users.getById(cleanId);
+      if (!user) return err('Không tìm thấy người dùng', 404);
 
-    return comment;
-  },
+      const { password, passwordHash, ...updateData } = data;
+      const clean = {
+        displayName: Security.XSS.sanitizeInput(updateData.displayName || user.displayName),
+        email:       Security.XSS.sanitizeInput(updateData.email || user.email || ''),
+        phone:       Security.XSS.sanitizeInput(updateData.phone || user.phone || ''),
+        role:        updateData.role && ['admin', 'telecom', 'business', 'accounting'].includes(updateData.role) ? updateData.role : user.role,
+        department:  updateData.department || user.department,
+        active:      updateData.active !== undefined ? Boolean(updateData.active) : user.active
+      };
 
-  /* ---- NOTIFICATIONS ---- */
-  async getNotifications(userId=null) {
-    await this._delay(60);
-    const uid = userId || Auth.userId;
-    return DB.notifications
-      .filter(n => n.user_id === uid || Auth.isAdmin)
-      .sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
-  },
+      const updated = DB.users.update(cleanId, clean);
+      DB.auditLogs.log(Auth.getCurrentUser().id, 'UPDATE_USER', cleanId, 'user', { fields: Object.keys(clean) });
 
-  async markNotificationRead(id) {
-    const n = DB.notifications.find(n => n.id === id);
-    if (n) n.is_read = true;
-  },
+      return ok(sanitizeUserOutput(updated));
+    },
 
-  async markAllRead() {
-    DB.notifications.filter(n => n.user_id === Auth.userId).forEach(n => n.is_read = true);
-  },
+    delete(id) {
+      const authErr = authCheck();
+      if (authErr) return authErr;
+      if (!Auth.isAdmin()) return err('Chỉ admin được xóa người dùng', 403);
 
-  getUnreadCount() {
-    return DB.notifications.filter(n => n.user_id === Auth.userId && !n.is_read).length;
-  },
+      const cleanId = Security.XSS.sanitizeInput(id);
+      if (cleanId === Auth.getCurrentUser().id) return err('Không thể xóa tài khoản đang đăng nhập', 400);
 
-  /* ---- USERS ---- */
-  async getUsers() {
-    await this._delay(80);
-    return DB.users.map(u => ({ ...u, password: undefined }));
-  },
-
-  async createUser(payload) {
-    await this._delay(200);
-    if (DB.users.find(u => u.username === payload.username)) {
-      throw new Error('Tên đăng nhập đã tồn tại');
+      DB.users.delete(cleanId);
+      DB.auditLogs.log(Auth.getCurrentUser().id, 'DELETE_USER', cleanId, 'user', {});
+      return ok({ deleted: true });
     }
-    const id = DB.newId();
-    const user = {
-      id, ...payload,
-      avatar: Utils.getInitials(payload.full_name),
-      is_active: true,
-      created_at: new Date().toISOString()
-    };
-    DB.users.push(user);
-    return { ...user, password: undefined };
-  },
+  };
 
-  async updateUser(id, payload) {
-    await this._delay(150);
-    const idx = DB.users.findIndex(u => u.id === id);
-    if (idx === -1) throw new Error('Không tìm thấy người dùng');
-    DB.users[idx] = { ...DB.users[idx], ...payload };
-    return { ...DB.users[idx], password: undefined };
-  },
+  /* ─── Comment API ─── */
+  const comments = {
+    add(dossierId, text) {
+      const authErr = authCheck();
+      if (authErr) return authErr;
 
-  async deleteUser(id) {
-    await this._delay(150);
-    const idx = DB.users.findIndex(u => u.id === id);
-    if (idx === -1) throw new Error('Không tìm thấy người dùng');
-    if (id === Auth.userId) throw new Error('Không thể xóa tài khoản đang đăng nhập');
-    DB.users[idx].is_active = false;
-    return true;
-  },
+      const cleanId   = Security.XSS.sanitizeInput(dossierId);
+      const cleanText = Security.XSS.sanitizeInput(text);
 
-  /* ---- DASHBOARD STATS ---- */
-  async getDashboardStats() {
-    await this._delay(100);
-    const allDossiers = DB.dossiers.filter(d => !d.is_deleted);
-    const now = new Date();
+      if (!cleanText || cleanText.length < 1) return err('Nội dung bình luận không được rỗng');
+      if (cleanText.length > 1000) return err('Bình luận quá dài (tối đa 1000 ký tự)');
 
-    const byStatus = {};
-    WORKFLOW.steps.forEach(s => { byStatus[s.key] = 0; });
-    allDossiers.forEach(d => { if (byStatus[d.status] !== undefined) byStatus[d.status]++; });
+      const dossier = DB.dossiers.getById(cleanId);
+      if (!dossier) return err('Không tìm thấy hồ sơ', 404);
 
-    const overdue = allDossiers.filter(d =>
-      d.deadline && new Date(d.deadline) < now &&
-      !['paid','archived'].includes(d.status)
-    );
+      const user    = Auth.getCurrentUser();
+      const comment = DB.comments.add(cleanId, user.id, cleanText);
+      DB.auditLogs.log(user.id, 'ADD_COMMENT', cleanId, 'dossier', { commentId: comment.id });
 
-    const totalAmount = allDossiers.reduce((s,d) => s + (d.amount||0), 0);
-    const paidAmount = allDossiers.filter(d=>d.status==='paid').reduce((s,d)=>s+(d.amount||0),0);
+      return ok(comment);
+    },
 
-    const byDept = {};
-    allDossiers.forEach(d => {
-      byDept[d.department] = (byDept[d.department]||0)+1;
-    });
+    delete(dossierId, commentId) {
+      const authErr = authCheck();
+      if (authErr) return authErr;
 
-    const byPriority = { high:0, medium:0, low:0 };
-    allDossiers.forEach(d => { byPriority[d.priority]++; });
+      const cleanDId = Security.XSS.sanitizeInput(dossierId);
+      const cleanCId = Security.XSS.sanitizeInput(commentId);
 
-    const recentActivity = DB.auditLogs
-      .sort((a,b) => new Date(b.timestamp)-new Date(a.timestamp))
-      .slice(0,8);
+      const user     = Auth.getCurrentUser();
+      const comments = DB.comments.getByDossier(cleanDId);
+      const comment  = comments.find(c => c.id === cleanCId);
 
+      if (!comment) return err('Không tìm thấy bình luận', 404);
+      if (comment.userId !== user.id && !Auth.isAdmin()) return err('Chỉ có thể xóa bình luận của chính mình', 403);
+
+      DB.comments.delete(cleanDId, cleanCId);
+      return ok({ deleted: true });
+    }
+  };
+
+  /* ─── Notification API ─── */
+  const notifications = {
+    list() {
+      const authErr = authCheck();
+      if (authErr) return authErr;
+      const user = Auth.getCurrentUser();
+      const list = DB.notifications.getByUser(user.id);
+      return ok(list, { unread: DB.notifications.getUnreadCount(user.id) });
+    },
+
+    markRead(id) {
+      const authErr = authCheck();
+      if (authErr) return authErr;
+      DB.notifications.markRead(Security.XSS.sanitizeInput(id));
+      return ok({ marked: true });
+    },
+
+    markAllRead() {
+      const authErr = authCheck();
+      if (authErr) return authErr;
+      DB.notifications.markAllRead(Auth.getCurrentUser().id);
+      return ok({ marked: true });
+    }
+  };
+
+  /* ─── Stats API ─── */
+  const stats = {
+    dashboard() {
+      const authErr = authCheck();
+      if (authErr) return authErr;
+
+      const byStatus   = DB.stats.byStatus();
+      const byDept     = DB.stats.byDepartment();
+      const total      = DB.dossiers.getAll().length;
+      const overdue    = DB.stats.overdue();
+      const totalAmt   = DB.stats.totalAmount();
+
+      // Tính tỷ lệ hoàn thành (paid + archived / total)
+      const completed  = (byStatus.paid || 0) + (byStatus.archived || 0);
+      const rate       = total > 0 ? Math.round(completed / total * 100) : 0;
+
+      return ok({ byStatus, byDept, total, overdue: overdue.length, totalAmount: totalAmt, completionRate: rate });
+    }
+  };
+
+  /* ─── Private helpers ─── */
+  function enrichDossier(d) {
+    if (!d) return null;
+    const creator  = DB.users.getById(d.creatorId);
+    const assignee = DB.users.getById(d.assigneeId);
     return {
-      total: allDossiers.length,
-      byStatus,
-      overdue: overdue.length,
-      overdueList: overdue.slice(0,5),
-      totalAmount,
-      paidAmount,
-      byDept,
-      byPriority,
-      recentActivity,
-      users: DB.users.filter(u=>u.is_active).length
+      ...d,
+      creatorName:  creator?.displayName  || 'N/A',
+      assigneeName: assignee?.displayName || 'Chưa giao',
+      creatorAvatar:  creator?.avatar,
+      assigneeAvatar: assignee?.avatar,
+      creatorColor:   creator?.color,
+      assigneeColor:  assignee?.color,
+      deadlineInfo: Utils.deadlineStatus(d.deadline)
     };
-  },
+  }
 
-  /* ---- PRIVATE ---- */
-  _addAuditLog(data) {
-    DB.auditLogs.push({
-      id: DB.newId(),
-      user_id: Auth.userId,
-      user_name: Auth.user?.full_name || 'System',
-      user_role: Auth.role,
-      ip_address: '127.0.0.1',
-      timestamp: new Date().toISOString(),
-      ...data
-    });
-  },
+  function sanitizeUserOutput(u) {
+    if (!u) return null;
+    // Không trả về passwordHash
+    const { passwordHash, ...safe } = u;
+    return safe;
+  }
 
-  _addNotification(data) {
-    DB.notifications.push({
-      id: DB.newId(),
-      is_read: false,
-      created_at: new Date().toISOString(),
-      ...data
-    });
-  },
+  /* ─── Public ─── */
+  return { dossiers, users, comments, notifications, stats };
+})();
 
-  _delay(ms) { return new Promise(r => setTimeout(r, ms)); }
-};
+window.API = API;

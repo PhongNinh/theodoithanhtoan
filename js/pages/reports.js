@@ -1,214 +1,283 @@
-/* ===========================
-   Reports & Analytics Page
-   =========================== */
+/**
+ * reports.js - Báo cáo & Analytics
+ */
 
-window.ReportsPage = {
-  charts: {},
-  filters: { date_from:'', date_to:'', department:'', status:'' },
+const PageReports = (() => {
+  'use strict';
+  const e = Security.e;
+  let _charts = {};
 
-  async render() {
-    document.getElementById('pageContainer').innerHTML = `<div class="loading"><div class="spinner"></div></div>`;
-    this._renderLayout();
-    await this.loadData();
-  },
-
-  _renderLayout() {
-    const today = new Date();
-    const firstDay = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().slice(0,10);
-    const lastDay = today.toISOString().slice(0,10);
-
-    document.getElementById('pageContainer').innerHTML = `
-      <div class="page-header">
-        <div>
-          <div class="page-title"><i class="fas fa-chart-bar" style="color:var(--primary)"></i> Báo cáo & Phân tích</div>
-          <div class="page-subtitle">Thống kê tổng hợp hoạt động thanh toán</div>
-        </div>
-        <div class="page-actions">
-          ${Auth.can('export')?`<button class="btn btn-success" onclick="ReportsPage.exportAll()"><i class="fas fa-file-excel"></i> Xuất Excel đầy đủ</button>`:''}
-        </div>
-      </div>
-
-      <!-- Report Filters -->
-      <div class="card mb-24">
-        <div class="card-title" style="margin-bottom:16px"><i class="fas fa-filter"></i> Bộ lọc báo cáo</div>
-        <div class="report-filters">
-          <div class="filter-group">
-            <label>Từ ngày</label>
-            <input type="date" id="rFrom" value="${firstDay}" onchange="ReportsPage.setFilter('date_from',this.value)" />
-          </div>
-          <div class="filter-group">
-            <label>Đến ngày</label>
-            <input type="date" id="rTo" value="${lastDay}" onchange="ReportsPage.setFilter('date_to',this.value)" />
-          </div>
-          <div class="filter-group">
-            <label>Phòng ban</label>
-            <select onchange="ReportsPage.setFilter('department',this.value)">
-              <option value="">Tất cả</option>
-              <option value="vien_thong">Viễn thông</option>
-              <option value="kinh_doanh">Kinh doanh</option>
-              <option value="ke_toan">Kế toán</option>
-            </select>
-          </div>
-          <div class="filter-group">
-            <label>Trạng thái</label>
-            <select onchange="ReportsPage.setFilter('status',this.value)">
-              <option value="">Tất cả</option>
-              ${WORKFLOW.steps.map(s=>`<option value="${s.key}">${s.label}</option>`).join('')}
-            </select>
-          </div>
-          <button class="btn btn-primary" onclick="ReportsPage.loadData()"><i class="fas fa-search"></i> Cập nhật</button>
-        </div>
-      </div>
-
-      <!-- KPI STATS -->
-      <div class="stats-grid" id="reportStats"></div>
-
-      <!-- CHARTS ROW 1 -->
-      <div class="charts-grid mb-24">
-        <div class="card"><div class="card-title mb-16"><i class="fas fa-chart-pie"></i> Phân bố theo trạng thái</div><div class="chart-container"><canvas id="rChartStatus"></canvas></div></div>
-        <div class="card"><div class="card-title mb-16"><i class="fas fa-chart-bar"></i> Giá trị theo phòng ban (tỷ VND)</div><div class="chart-container"><canvas id="rChartDept"></canvas></div></div>
-      </div>
-
-      <!-- CHARTS ROW 2 -->
-      <div class="charts-grid mb-24">
-        <div class="card"><div class="card-title mb-16"><i class="fas fa-chart-line"></i> Xu hướng tạo hồ sơ theo tháng</div><div class="chart-container"><canvas id="rChartTrend"></canvas></div></div>
-        <div class="card"><div class="card-title mb-16"><i class="fas fa-flag"></i> Phân bố ưu tiên</div><div class="chart-container"><canvas id="rChartPriority"></canvas></div></div>
-      </div>
-
-      <!-- DATA TABLE -->
-      <div class="card">
-        <div class="card-header">
-          <div class="card-title"><i class="fas fa-table"></i> Chi tiết hồ sơ</div>
-          <button class="btn btn-sm btn-secondary" onclick="ReportsPage.exportFiltered()"><i class="fas fa-download"></i> Xuất CSV</button>
-        </div>
-        <div class="table-wrapper">
-          <table id="reportTable">
-            <thead><tr>
-              <th>MÃ HS</th><th>TÊN DỰ ÁN</th><th>PHÒNG BAN</th><th>TRẠNG THÁI</th><th>ƯU TIÊN</th><th>GIÁ TRỊ (VND)</th><th>DEADLINE</th><th>NGÀY TẠO</th>
-            </tr></thead>
-            <tbody id="reportTableBody"><tr><td colspan="8" style="text-align:center;padding:20px"><div class="spinner" style="margin:0 auto"></div></td></tr></tbody>
-          </table>
-        </div>
-      </div>
-    `;
-  },
-
-  async loadData() {
-    const dossiers = await API.getDossiers(this.filters);
-    const filtered = dossiers.filter(d=>!d.is_deleted);
-    this._renderStats(filtered);
-    this._renderCharts(filtered);
-    this._renderTable(filtered);
-    this._filteredData = filtered;
-  },
-
-  setFilter(key, val) {
-    this.filters[key] = val;
-  },
-
-  _renderStats(data) {
-    const total = data.length;
-    const totalAmt = data.reduce((s,d)=>s+(d.amount||0),0);
-    const paidAmt = data.filter(d=>d.status==='paid').reduce((s,d)=>s+(d.amount||0),0);
-    const overdue = data.filter(d=>Utils.isOverdue(d.deadline)&&!['paid','archived'].includes(d.status)).length;
-    const approved = data.filter(d=>['approved','paid'].includes(d.status)).length;
-
-    document.getElementById('reportStats').innerHTML = `
-      <div class="stat-card primary"><div class="stat-icon"><i class="fas fa-folder"></i></div><div class="stat-info"><div class="stat-value">${total}</div><div class="stat-label">Tổng hồ sơ</div></div></div>
-      <div class="stat-card success"><div class="stat-icon"><i class="fas fa-money-check-alt"></i></div><div class="stat-info"><div class="stat-value">${Utils.formatAmount(totalAmt)}</div><div class="stat-label">Tổng giá trị (VND)</div></div></div>
-      <div class="stat-card info"><div class="stat-icon"><i class="fas fa-check-circle"></i></div><div class="stat-info"><div class="stat-value">${Utils.formatAmount(paidAmt)}</div><div class="stat-label">Đã thanh toán</div></div></div>
-      <div class="stat-card warning"><div class="stat-icon"><i class="fas fa-thumbs-up"></i></div><div class="stat-info"><div class="stat-value">${approved}</div><div class="stat-label">Đã phê duyệt/TT</div></div></div>
-      <div class="stat-card danger"><div class="stat-icon"><i class="fas fa-exclamation-triangle"></i></div><div class="stat-info"><div class="stat-value">${overdue}</div><div class="stat-label">Quá hạn</div></div></div>
-    `;
-  },
-
-  _renderCharts(data) {
-    Object.values(this.charts).forEach(c=>{try{c.destroy()}catch(e){}});
-    this.charts = {};
-
-    const byStatus = {};
-    WORKFLOW.steps.forEach(s=>{byStatus[s.key]=0});
-    data.forEach(d=>{if(byStatus[d.status]!==undefined)byStatus[d.status]++});
-
-    // Status pie
-    const cs = document.getElementById('rChartStatus');
-    if (cs) this.charts.status = new Chart(cs,{
-      type:'pie',
-      data:{
-        labels:WORKFLOW.steps.map(s=>s.label),
-        datasets:[{data:WORKFLOW.steps.map(s=>byStatus[s.key]||0),backgroundColor:['#94a3b8','#3b82f6','#06b6d4','#8b5cf6','#10b981','#16a34a','#6b7280'],borderWidth:2,borderColor:'#fff'}]
-      },
-      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{font:{size:10},padding:8}}}}
-    });
-
-    // Dept bar
-    const deptAmts = { vien_thong:0, kinh_doanh:0, ke_toan:0 };
-    data.forEach(d=>{ if(deptAmts[d.department]!==undefined) deptAmts[d.department]+=(d.amount||0)/1e9; });
-    const cd = document.getElementById('rChartDept');
-    if (cd) this.charts.dept = new Chart(cd,{
-      type:'bar',
-      data:{
-        labels:Object.keys(deptAmts).map(k=>DEPT_LABELS[k]),
-        datasets:[{label:'Giá trị (tỷ VND)',data:Object.values(deptAmts).map(v=>+v.toFixed(2)),backgroundColor:['#3b82f6','#f59e0b','#10b981'],borderRadius:8,borderSkipped:false}]
-      },
-      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,grid:{color:'#f1f5f9'}},x:{grid:{display:false}}}}
-    });
-
-    // Trend by month
-    const monthCounts = {};
-    data.forEach(d=>{
-      const m = new Date(d.created_at||Date.now()).toLocaleDateString('vi-VN',{month:'short',year:'numeric'});
-      monthCounts[m] = (monthCounts[m]||0)+1;
-    });
-    const ct = document.getElementById('rChartTrend');
-    if (ct) this.charts.trend = new Chart(ct,{
-      type:'line',
-      data:{
-        labels:Object.keys(monthCounts),
-        datasets:[{label:'Hồ sơ tạo mới',data:Object.values(monthCounts),borderColor:'#2563eb',backgroundColor:'rgba(37,99,235,.1)',fill:true,tension:.4,pointRadius:5,pointHoverRadius:8}]
-      },
-      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,grid:{color:'#f1f5f9'}},x:{grid:{display:false}}}}
-    });
-
-    // Priority donut
-    const byPriority = {high:0,medium:0,low:0};
-    data.forEach(d=>{byPriority[d.priority]=(byPriority[d.priority]||0)+1});
-    const cp = document.getElementById('rChartPriority');
-    if (cp) this.charts.priority = new Chart(cp,{
-      type:'doughnut',
-      data:{
-        labels:['🔴 Cao','🟡 Trung bình','🟢 Thấp'],
-        datasets:[{data:[byPriority.high,byPriority.medium,byPriority.low],backgroundColor:['#dc2626','#d97706','#059669'],borderWidth:2,borderColor:'#fff'}]
-      },
-      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{font:{size:11}}}},cutout:'55%'}
-    });
-  },
-
-  _renderTable(data) {
-    const tbody = document.getElementById('reportTableBody');
-    if (!tbody) return;
-    tbody.innerHTML = data.length ? data.map(d=>`
-      <tr onclick="openDossierDetail('${d.id}')" style="cursor:pointer">
-        <td class="td-code">${d.dossier_code}</td>
-        <td style="max-width:220px">${Utils.truncate(d.project_name,50)}</td>
-        <td>${Utils.deptLabel(d.department)}</td>
-        <td>${Utils.statusBadge(d.status)}</td>
-        <td>${Utils.priorityBadge(d.priority)}</td>
-        <td class="td-amount">${Utils.formatCurrency(d.amount)}</td>
-        <td>${Utils.deadlineHtml(d.deadline,true)}</td>
-        <td>${Utils.formatDate(d.created_at)}</td>
-      </tr>`).join('') : `<tr><td colspan="8"><div class="empty-state">Không có dữ liệu</div></td></tr>`;
-  },
-
-  exportAll() {
-    const all = DB.dossiers.filter(d=>!d.is_deleted);
-    Utils.exportCSV(all, `BaoCao_ToanBo_${Utils.formatDate(new Date().toISOString())}.csv`);
-    Toast.show('Thành công','Đã xuất báo cáo đầy đủ!','success');
-  },
-
-  exportFiltered() {
-    if (!this._filteredData?.length) return Toast.show('Cảnh báo','Không có dữ liệu!','warning');
-    Utils.exportCSV(this._filteredData, `BaoCao_LocDuLieu_${Date.now()}.csv`);
-    Toast.show('Thành công','Đã xuất báo cáo!','success');
+  function destroyCharts() {
+    Object.values(_charts).forEach(c => { try { c.destroy(); } catch (err) {} });
+    _charts = {};
   }
-};
+
+  function render() {
+    if (!Auth.hasPermission('report.view') && !Auth.isAdmin()) {
+      document.getElementById('mainContent').innerHTML = `<div class="empty-state"><i class="fas fa-lock"></i><p>Bạn không có quyền xem báo cáo</p></div>`;
+      return;
+    }
+
+    const dossiers = DB.dossiers.getAll();
+    const steps    = DB.WORKFLOW_STEPS;
+    const byStatus = DB.stats.byStatus();
+    const byDept   = DB.stats.byDepartment();
+    const overdue  = DB.stats.overdue();
+    const totalAmt = DB.stats.totalAmount();
+
+    // Monthly amount
+    const monthlyData = buildMonthlyData(dossiers);
+
+    const html = `
+<div class="reports-page">
+  <div class="page-header">
+    <h1 class="page-title"><i class="fas fa-chart-bar me-2"></i>Báo cáo & Phân tích</h1>
+    <div class="header-actions">
+      <button class="btn btn-success" onclick="PageReports.exportExcel()">
+        <i class="fas fa-file-excel me-1"></i>Xuất Excel
+      </button>
+      <button class="btn btn-outline" onclick="PageReports.exportPDF()">
+        <i class="fas fa-file-pdf me-1"></i>Xuất CSV
+      </button>
+    </div>
+  </div>
+
+  <!-- Summary KPIs -->
+  <div class="kpi-grid mb-4">
+    <div class="kpi-card kpi-blue">
+      <div class="kpi-icon"><i class="fas fa-folder-open"></i></div>
+      <div class="kpi-body">
+        <div class="kpi-value">${e(String(dossiers.length))}</div>
+        <div class="kpi-label">Tổng hồ sơ</div>
+      </div>
+    </div>
+    <div class="kpi-card kpi-green">
+      <div class="kpi-icon"><i class="fas fa-money-bill-wave"></i></div>
+      <div class="kpi-body">
+        <div class="kpi-value">${formatBillion(totalAmt)}</div>
+        <div class="kpi-label">Tổng giá trị</div>
+      </div>
+    </div>
+    <div class="kpi-card kpi-orange">
+      <div class="kpi-icon"><i class="fas fa-exclamation-circle"></i></div>
+      <div class="kpi-body">
+        <div class="kpi-value">${e(String(overdue.length))}</div>
+        <div class="kpi-label">Quá hạn</div>
+      </div>
+    </div>
+    <div class="kpi-card kpi-purple">
+      <div class="kpi-icon"><i class="fas fa-percentage"></i></div>
+      <div class="kpi-body">
+        <div class="kpi-value">${e(String(dossiers.length > 0 ? Math.round(((byStatus.paid || 0) + (byStatus.archived || 0)) / dossiers.length * 100) : 0))}%</div>
+        <div class="kpi-label">Hoàn thành</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Charts -->
+  <div class="charts-row mb-4">
+    <div class="chart-card">
+      <h3 class="chart-title"><i class="fas fa-chart-pie me-2"></i>Phân bổ theo trạng thái</h3>
+      <div style="height:280px"><canvas id="rptStatus"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <h3 class="chart-title"><i class="fas fa-chart-bar me-2"></i>Giá trị theo phòng ban</h3>
+      <div style="height:280px"><canvas id="rptDept"></canvas></div>
+    </div>
+  </div>
+
+  <div class="charts-row mb-4">
+    <div class="chart-card flex-2">
+      <h3 class="chart-title"><i class="fas fa-chart-line me-2"></i>Xu hướng tạo hồ sơ (6 tháng)</h3>
+      <div style="height:240px"><canvas id="rptTrend"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <h3 class="chart-title"><i class="fas fa-chart-pie me-2"></i>Theo độ ưu tiên</h3>
+      <div style="height:240px"><canvas id="rptPriority"></canvas></div>
+    </div>
+  </div>
+
+  <!-- Overdue table -->
+  ${overdue.length ? `
+  <div class="card mb-4">
+    <div class="card-header"><h3><i class="fas fa-exclamation-triangle text-danger me-2"></i>Hồ sơ Quá hạn (${e(String(overdue.length))})</h3></div>
+    <div class="card-body p-0">
+      <table class="table">
+        <thead>
+          <tr><th>Mã HS</th><th>Tên dự án</th><th>Trạng thái</th><th>Giá trị</th><th>Deadline</th><th>Quá hạn</th></tr>
+        </thead>
+        <tbody>
+          ${overdue.map(d => {
+            const sb = Utils.statusBadge(d.status);
+            const dayLate = Math.floor((Date.now() - new Date(d.deadline).getTime()) / 86400000);
+            return `
+              <tr class="row-overdue" onclick="App.navigate('dossiers');setTimeout(()=>PageDossiers.openDetail('${e(d.id)}'),100)" style="cursor:pointer">
+                <td><span class="mono">${e(d.id)}</span></td>
+                <td>${e(d.projectName)}</td>
+                <td><span class="badge ${e(sb.class)}">${e(sb.label)}</span></td>
+                <td>${e(Utils.fmt.currency(d.amount))}</td>
+                <td>${e(Utils.fmt.date(d.deadline))}</td>
+                <td class="text-danger fw-bold">${e(String(dayLate))} ngày</td>
+              </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+  </div>` : ''}
+
+  <!-- Amount by status -->
+  <div class="card">
+    <div class="card-header"><h3><i class="fas fa-table me-2"></i>Thống kê chi tiết theo trạng thái</h3></div>
+    <div class="card-body p-0">
+      <table class="table">
+        <thead><tr><th>Trạng thái</th><th>Số hồ sơ</th><th>Tổng giá trị</th><th>TB/hồ sơ</th><th>Tỷ lệ</th></tr></thead>
+        <tbody>
+          ${steps.map(step => {
+            const cnt  = byStatus[step.id] || 0;
+            const amt  = dossiers.filter(d => d.status === step.id).reduce((s, d) => s + (d.amount || 0), 0);
+            const avg  = cnt > 0 ? amt / cnt : 0;
+            const pct  = dossiers.length > 0 ? Math.round(cnt / dossiers.length * 100) : 0;
+            return `
+              <tr>
+                <td><span style="color:${e(step.color)}"><i class="fas ${e(step.icon)} me-1"></i>${e(step.label)}</span></td>
+                <td>${e(String(cnt))}</td>
+                <td>${e(Utils.fmt.currency(amt))}</td>
+                <td>${e(Utils.fmt.currency(avg))}</td>
+                <td>
+                  <div class="progress-inline">
+                    <div class="progress-bar-mini" style="width:${e(String(pct))}%;background:${e(step.color)}"></div>
+                    <span>${e(String(pct))}%</span>
+                  </div>
+                </td>
+              </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>`;
+
+    document.getElementById('mainContent').innerHTML = html;
+    destroyCharts();
+
+    // Render charts
+    setTimeout(() => {
+      renderStatusChart(byStatus, steps);
+      renderDeptChart(dossiers);
+      renderTrendChart(monthlyData);
+      renderPriorityChart(dossiers);
+    }, 100);
+  }
+
+  function buildMonthlyData(dossiers) {
+    const months = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date();
+      d.setMonth(d.getMonth() - i);
+      months.push({
+        label: d.toLocaleDateString('vi-VN', { month: 'short', year: '2-digit' }),
+        year: d.getFullYear(), month: d.getMonth(),
+        count: 0, amount: 0
+      });
+    }
+    dossiers.forEach(d => {
+      const date = new Date(d.createdAt);
+      const m = months.find(mo => mo.year === date.getFullYear() && mo.month === date.getMonth());
+      if (m) { m.count++; m.amount += d.amount || 0; }
+    });
+    return months;
+  }
+
+  function renderStatusChart(byStatus, steps) {
+    const ctx = document.getElementById('rptStatus');
+    if (!ctx || !window.Chart) return;
+    _charts.status = new Chart(ctx, {
+      type: 'pie',
+      data: {
+        labels: steps.map(s => s.label),
+        datasets: [{ data: steps.map(s => byStatus[s.id] || 0), backgroundColor: steps.map(s => s.color), borderWidth: 2, borderColor: '#fff' }]
+      },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
+    });
+  }
+
+  function renderDeptChart(dossiers) {
+    const ctx = document.getElementById('rptDept');
+    if (!ctx || !window.Chart) return;
+    const depts = ['telecom', 'business', 'accounting'];
+    const labels = ['Viễn thông', 'Kinh doanh', 'Kế toán'];
+    const colors = ['#007bff', '#fd7e14', '#28a745'];
+    const amounts = depts.map(d => dossiers.filter(x => x.department === d).reduce((s, x) => s + (x.amount || 0), 0) / 1e6);
+
+    _charts.dept = new Chart(ctx, {
+      type: 'bar',
+      data: { labels, datasets: [{ label: 'Tổng giá trị (Triệu đ)', data: amounts, backgroundColor: colors, borderRadius: 6 }] },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+    });
+  }
+
+  function renderTrendChart(monthlyData) {
+    const ctx = document.getElementById('rptTrend');
+    if (!ctx || !window.Chart) return;
+    _charts.trend = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: monthlyData.map(m => m.label),
+        datasets: [
+          { label: 'Số hồ sơ', data: monthlyData.map(m => m.count), borderColor: '#007bff', backgroundColor: 'rgba(0,123,255,0.1)', tension: 0.4, fill: true },
+        ]
+      },
+      options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } } }
+    });
+  }
+
+  function renderPriorityChart(dossiers) {
+    const ctx = document.getElementById('rptPriority');
+    if (!ctx || !window.Chart) return;
+    const priorities = ['urgent', 'high', 'medium', 'low'];
+    const labels = ['Khẩn cấp', 'Cao', 'Trung bình', 'Thấp'];
+    const colors = ['#dc3545', '#fd7e14', '#ffc107', '#28a745'];
+    const counts = priorities.map(p => dossiers.filter(d => d.priority === p).length);
+
+    _charts.priority = new Chart(ctx, {
+      type: 'doughnut',
+      data: { labels, datasets: [{ data: counts, backgroundColor: colors, borderWidth: 2, borderColor: '#fff' }] },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
+    });
+  }
+
+  function formatBillion(amount) {
+    if (!amount) return '0 đ';
+    if (amount >= 1e9) return (amount / 1e9).toFixed(2) + ' Tỷ';
+    if (amount >= 1e6) return (amount / 1e6).toFixed(1) + ' Tr';
+    return Utils.fmt.currency(amount);
+  }
+
+  function exportExcel() {
+    const dossiers = DB.dossiers.getAll();
+    const deptMap  = { telecom: 'Viễn thông', business: 'Kinh doanh', accounting: 'Kế toán' };
+    const rows = dossiers.map(d => ({
+      'Mã HS': d.id,
+      'Tên dự án': d.projectName,
+      'Số HĐ': d.contractNo || '',
+      'Phòng ban': deptMap[d.department] || d.department,
+      'Trạng thái': Utils.statusBadge(d.status).label,
+      'Ưu tiên': d.priority,
+      'Giá trị (VNĐ)': d.amount,
+      'Deadline': d.deadline || '',
+      'Người tạo': DB.users.getById(d.creatorId)?.displayName || '',
+      'Người xử lý': DB.users.getById(d.assigneeId)?.displayName || '',
+      'Ngày tạo': Utils.fmt.datetime(d.createdAt),
+      'Cập nhật': Utils.fmt.datetime(d.updatedAt),
+      'Mô tả': d.description || '',
+      'Ghi chú': d.notes || ''
+    }));
+    Utils.exportCSV(rows, `bao-cao-ho-so-${new Date().toISOString().split('T')[0]}.csv`);
+  }
+
+  function exportPDF() { exportExcel(); }
+
+  return { render, exportExcel, exportPDF };
+})();
+
+window.PageReports = PageReports;

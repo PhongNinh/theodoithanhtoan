@@ -1,205 +1,178 @@
-# PayTrack Pro — Enterprise Payment Dossier Management System
-
-> **Hệ thống Quản lý Hồ sơ Thanh toán** dành cho 3 phòng ban: Viễn thông, Kinh doanh, Kế toán
-
----
-
-## 🎯 Mục tiêu
-
-- **Không mất hồ sơ** — mọi tài liệu đều được theo dõi toàn bộ vòng đời
-- **Theo dõi đầy đủ** — lịch sử từng bước, ai làm gì, khi nào
-- **Phân công rõ ràng** — trách nhiệm minh bạch theo phòng ban
-- **Giám sát thời gian thực** — dashboard, cảnh báo quá hạn, thông báo
+# PayTrack Pro v2.0
+## Hệ thống Quản lý Hồ sơ Thanh toán Doanh nghiệp
 
 ---
 
-## ✅ Tính năng đã hoàn thành
+## 🚀 Tính năng đã hoàn thành
 
-### 🔐 Xác thực & Phân quyền (RBAC)
-- Đăng nhập / Đăng xuất với session persistence
-- 4 vai trò: Admin, Viễn thông, Kinh doanh, Kế toán
-- Điều hướng và giao diện thay đổi theo role
-- Protected routes dựa trên permission matrix
+### 🔐 Bảo mật (Client-side tối đa)
+- **XSS Prevention**: Escape HTML entities, sanitize tất cả input/output, loại bỏ script tags
+- **Rate Limiting / Brute-force**: Khóa tài khoản sau 5 lần thất bại trong 15 phút, đếm ngược unlock
+- **SHA-256 Password Hashing**: Mật khẩu được hash với salt trước khi lưu/so sánh
+- **Session Timeout**: Auto-logout sau 30 phút không hoạt động, cảnh báo 5 phút trước
+- **Content Security Policy (CSP)**: Meta tag ngăn script/style injection
+- **CSRF Token**: Token duy nhất mỗi phiên làm việc
+- **Clickjacking Protection**: Phát hiện và chặn iframe embedding
+- **Secure Storage**: Session data obfuscated trong sessionStorage (base64 + JSON)
+- **Input Validation**: Schema validation cho tất cả form inputs
+- **NoSQL Injection Prevention**: Loại bỏ $operators trong queries
+- **Audit Logging**: Ghi nhận toàn bộ hành động trong hệ thống
+- **Security Dashboard**: Admin xem security events realtime
 
-### 📂 Quản lý Hồ sơ Thanh toán
-- Tạo / Sửa / Xóa (soft-delete) hồ sơ
-- Auto-generate mã hồ sơ (HS-2024-XXX)
-- Đầy đủ trường: tên dự án, số HĐ, phòng ban, người phụ trách, ưu tiên, giá trị, deadline
-- Phân trang, tìm kiếm, lọc đa tiêu chí
-- Bình luận nội bộ theo từng hồ sơ
-
-### 🔄 Workflow 7 bước
-1. **Khởi tạo** (Created) — Kinh doanh/Viễn thông tạo
-2. **Đã nộp** (Submitted) — Nộp cho Viễn thông
-3. **Đã xác minh** (Verified) — Viễn thông xác nhận
-4. **Chờ Kế toán** (Sent to Accounting) — Chuyển Kế toán
-5. **Đã phê duyệt** (Approved) — Kế toán phê duyệt
-6. **Đã thanh toán** (Paid) — Hoàn tất
-7. **Lưu trữ** (Archived) — Archive
-
-- Mỗi chuyển đổi có validation theo role
-- Không thể bỏ qua bước (trừ Admin)
-
-### 📊 Dashboard & Phân tích
-- Thống kê KPI: tổng hồ sơ, đang xử lý, đã phê duyệt, quá hạn, giá trị
-- Pipeline workflow bar trực quan
-- Biểu đồ: donut (trạng thái), bar (phòng ban), line (xu hướng), priority
-- Danh sách hồ sơ quá hạn/sắp hạn
-- Activity feed thời gian thực
-
-### 🖥️ Kanban Board
-- 7 cột theo workflow steps
-- Cards có màu theo mức ưu tiên
-- Cảnh báo overdue, deadline countdown
-- Click để xem chi tiết / đổi trạng thái
-
-### 📋 Audit Log (Bất biến)
-- Mọi hành động đều được ghi log: tạo, sửa, đổi status, bình luận
-- Before/After values
-- Lọc theo action type, người dùng, mã hồ sơ
-- Timeline UI trực quan
+### 📋 Quản lý Hồ sơ
+- CRUD đầy đủ: Tạo, xem, sửa, xóa hồ sơ
+- 10 hồ sơ mẫu với đầy đủ dữ liệu
+- Filter đa chiều: status, phòng ban, ưu tiên, ngày, tìm kiếm
+- Sort nhiều chiều: ngày tạo, giá trị, deadline
+- Pagination 10 records/trang
 - Xuất CSV
 
-### 🔔 Hệ thống Thông báo
-- In-app notifications theo user
-- Phân loại: assignment, status_change, deadline, comment, approval
-- Đánh dấu đã đọc / đọc tất cả
-- Badge realtime trên sidebar
+### 🔄 Workflow 7 bước
+```
+Đã tạo → Đã nộp → Đã xác minh → Gửi Kế toán → Đã duyệt → Đã thanh toán → Lưu trữ
+```
+- Visual progress bar trong detail modal
+- Chỉ cho phép transition hợp lệ theo role
+- Ghi lịch sử mỗi lần chuyển trạng thái + ghi chú
 
-### 📤 Báo cáo & Xuất dữ liệu
-- Báo cáo đầy đủ với charts: status, dept, trend, priority
-- Filter theo date range, phòng ban, trạng thái
-- Xuất CSV/Excel với UTF-8 (tiếng Việt)
-- Backup toàn bộ dữ liệu JSON
+### 👥 RBAC (Phân quyền theo vai trò)
+| Vai trò | Quyền |
+|---------|-------|
+| Admin | Toàn quyền, quản lý users, security dashboard |
+| Viễn thông | Xem/xử lý hồ sơ, xác minh, gửi kế toán |
+| Kinh doanh | Tạo hồ sơ, theo dõi, nộp hồ sơ |
+| Kế toán | Phê duyệt, đánh dấu đã thanh toán, lưu trữ, xem báo cáo |
 
-### 👥 Quản lý Người dùng (Admin)
-- CRUD người dùng
-- Phân role và phòng ban
-- Vô hiệu hoá tài khoản (soft-delete)
-- Thống kê hồ sơ theo user
+### 📊 Dashboard & Báo cáo
+- KPI cards: Tổng hồ sơ, quá hạn, tỷ lệ hoàn thành, tổng giá trị
+- Charts: Phân bổ theo trạng thái (pie), phòng ban (bar), xu hướng (line), ưu tiên (doughnut)
+- Bảng thống kê chi tiết theo trạng thái
+- Xuất CSV/Excel báo cáo
+
+### 🔔 Thông báo
+- In-app notifications cho: hồ sơ mới được giao, thay đổi trạng thái, deadline, phê duyệt
+- Badge count trên icon
+- Đánh dấu đọc / đọc tất cả
+
+### 📅 Kanban Board
+- 7 cột tương ứng 7 trạng thái workflow
+- Cards với màu sắc theo priority, deadline indicator
+- Filter theo phòng ban
+- Click card mở detail
 
 ### 🔍 Tìm kiếm & Lọc
-- Global search (Ctrl+K) theo mã HS, tên dự án, số HĐ
-- Filter đa tiêu chí: status, dept, priority, assigned_to, date range
-- Search results dropdown
+- Global search (Ctrl+K): tìm theo ID, tên dự án
+- Filter đa điều kiện trong trang danh sách
+- Highlight kết quả tìm kiếm
 
-### 📱 QR Code Tracking
-- Mỗi hồ sơ có QR code riêng
-- QR chứa: mã HS, tên dự án, trạng thái, giá trị
+### 📜 Audit Log
+- Ghi nhận toàn bộ hành động: đăng nhập, tạo/sửa/xóa, chuyển trạng thái
+- Filter theo loại hành động, người thực hiện
+- Xuất CSV
 
 ### ⚙️ Cài đặt
-- Hồ sơ cá nhân (tên, email, mật khẩu)
-- System info
-- Database schema overview
-- Workflow config
-- Backup & Reset
+- Đổi mật khẩu với strength indicator
+- Xuất backup JSON
+- Reset về dữ liệu mẫu (Admin)
 
 ---
 
-## 🔑 Tài khoản Demo
-
-| Username | Password | Vai trò | Phòng ban |
-|---|---|---|---|
-| `admin` | `admin123` | Quản trị viên | Admin |
-| `vt_tuan` | `123456` | Nhân viên VT | Phòng Viễn thông |
-| `vt_huong` | `123456` | Nhân viên VT | Phòng Viễn thông |
-| `kd_minh` | `123456` | Nhân viên KD | Phòng Kinh doanh |
-| `kd_lan` | `123456` | Nhân viên KD | Phòng Kinh doanh |
-| `kt_hung` | `123456` | Nhân viên KT | Phòng Kế toán |
-| `kt_mai` | `123456` | Nhân viên KT | Phòng Kế toán |
-
----
-
-## 🗂️ Cấu trúc dự án
+## 🗂 Cấu trúc file
 
 ```
-index.html              — Entry point
+index.html              # Entry point
 css/
-  style.css             — Toàn bộ CSS (design system)
+  style.css             # Full stylesheet (~37KB)
 js/
-  data.js               — Static data store & workflow config
-  auth.js               — Authentication & RBAC
-  utils.js              — Utilities & formatters
-  api.js                — API layer (simulated backend)
-  app.js                — Main app controller
+  security.js           # Security module (XSS, rate-limit, session, CSRF)
+  data.js               # Database layer (localStorage)
+  auth.js               # Authentication & RBAC
+  utils.js              # Utilities, formatters, DOM helpers
+  api.js                # Internal API với validation
+  app.js                # App bootstrap, routing, layout
   pages/
-    dashboard.js        — Dashboard & analytics
-    dossiers.js         — Dossier list, create, detail
-    kanban.js           — Kanban board
-    audit.js            — Audit trail
-    notifications.js    — Notifications
-    reports.js          — Reports & charts
-    users.js            — User management
-    settings.js         — Settings
+    dashboard.js        # Trang tổng quan
+    dossiers.js         # Quản lý hồ sơ
+    kanban.js           # Kanban board
+    audit.js            # Audit log
+    notifications.js    # Thông báo
+    reports.js          # Báo cáo & analytics
+    users.js            # Quản lý người dùng (Admin)
+    settings.js         # Cài đặt hệ thống
+    security-dashboard.js # Security monitoring (Admin)
 ```
 
 ---
 
-## 🗄️ Mô hình Dữ liệu
+## 🔑 Tài khoản demo
 
-### users
-`id, username, full_name, email, password, role, department, avatar, is_active`
-
-### dossiers
-`id, dossier_code, project_name, contract_number, department, created_by_*, assigned_to_*, assigned_department, status, priority, amount, deadline, description, notes, tags, is_deleted, created_at`
-
-### audit_logs
-`id, dossier_id, dossier_code, user_id, user_name, user_role, action, field_changed, old_value, new_value, comment, ip_address, timestamp`
-
-### notifications
-`id, user_id, dossier_id, dossier_code, type, title, message, is_read, priority, created_at`
-
-### comments
-`id, dossier_id, user_id, user_name, user_role, content, is_internal, is_deleted, created_at`
+| Username | Password | Vai trò |
+|----------|----------|---------|
+| admin | admin123 | Quản trị viên |
+| vt_tuan | 123456 | Nhân viên Viễn thông |
+| vt_lan | 123456 | Nhân viên Viễn thông |
+| kd_minh | 123456 | Nhân viên Kinh doanh |
+| kd_huong | 123456 | Nhân viên Kinh doanh |
+| kt_hung | 123456 | Nhân viên Kế toán |
+| kt_nga | 123456 | Nhân viên Kế toán |
 
 ---
 
-## 🔄 Ma trận Phân quyền
+## 💾 Data Model
 
-| Hành động | Admin | Viễn thông | Kinh doanh | Kế toán |
-|---|---|---|---|---|
-| Tạo hồ sơ | ✅ | ✅ | ✅ | ❌ |
-| Sửa hồ sơ | ✅ | ✅ | ✅ | ❌ |
-| Xóa hồ sơ | ✅ | ❌ | ❌ | ❌ |
-| Đổi trạng thái | ✅ (all) | ✅ (1-3) | ✅ (1-2) | ✅ (4-7) |
-| Phê duyệt | ✅ | ❌ | ❌ | ✅ |
-| Đánh dấu Paid | ✅ | ❌ | ❌ | ✅ |
-| Quản lý Users | ✅ | ❌ | ❌ | ❌ |
-| Xuất báo cáo | ✅ | ❌ | ❌ | ✅ |
+Lưu trữ trong **localStorage** (browser), persist qua refresh.
+
+| Collection | Mô tả |
+|-----------|-------|
+| users | Tài khoản người dùng (không lưu plain password) |
+| dossiers | Hồ sơ thanh toán |
+| statusHistory | Lịch sử workflow mỗi hồ sơ |
+| notifications | Thông báo in-app |
+| auditLogs | Nhật ký hành động |
+| comments | Bình luận theo hồ sơ |
 
 ---
 
 ## ⌨️ Phím tắt
 
-- `Ctrl+K` — Mở global search
-- `Ctrl+N` — Tạo hồ sơ mới (nếu có quyền)
-- `Esc` — Đóng modal / search
+| Phím | Chức năng |
+|------|-----------|
+| Ctrl+K | Mở thanh tìm kiếm |
+| Ctrl+N | Tạo hồ sơ mới |
+| Esc | Đóng modal / search |
 
 ---
 
-## 🚧 Tính năng chưa triển khai (cần backend thực)
+## 🛡 Giới hạn bảo mật client-side
 
-- [ ] JWT Authentication thực (backend Node.js)
-- [ ] Lưu trữ file đính kèm (AWS S3 / local)
-- [ ] WebSocket thời gian thực
-- [ ] Email notifications
-- [ ] OCR scan tài liệu
-- [ ] Digital signature
+Đây là phiên bản **static web app** - không có server. Các giới hạn:
+
+1. ❌ Không thể ẩn connection string DB
+2. ❌ SHA-256 client-side yếu hơn bcrypt server-side
+3. ❌ Rate limiting chỉ ngăn tại UI (không ngăn API call trực tiếp)
+4. ❌ Dữ liệu localStorage không mã hóa hoàn toàn
+
+**Cho production thực tế:** Cần backend Node.js + MongoDB với bcrypt, JWT, HTTPS, rate-limiting server-side.
+
+---
+
+## 🚀 Triển khai
+
+Mở tab **Publish** trong editor để deploy lên internet ngay lập tức.
+
+---
+
+## 📈 Các tính năng chưa triển khai
+
+- [ ] Real-time WebSocket (cần backend)
+- [ ] Email notifications (cần SMTP server)
+- [ ] File attachments (cần file storage)
+- [ ] Digital signatures
+- [ ] OCR document scanning
+- [ ] QR tracking nâng cao
+- [ ] Export PDF (cần thư viện)
 - [ ] AI workflow suggestions
-- [ ] PostgreSQL + Prisma ORM
-- [ ] bcrypt password hashing
 
 ---
 
-## 🚀 Hướng phát triển tiếp theo
-
-1. **Backend API** — Node.js + Express + Prisma + PostgreSQL
-2. **File Attachments** — Upload PDF, Excel, ảnh lên AWS S3
-3. **Email System** — Nodemailer với SMTP
-4. **WebSocket** — Socket.io cho realtime notifications
-5. **Docker** — Containerize toàn bộ stack
-6. **Testing** — Jest unit tests, Cypress E2E
-
----
-
-*PayTrack Pro v1.0.0 — Enterprise Payment Dossier Tracking System*
+*PayTrack Pro v2.0 | Security Module v2.0.0 | © 2024*
