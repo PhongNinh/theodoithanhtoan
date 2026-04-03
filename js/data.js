@@ -1,409 +1,302 @@
-/**
- * data.js - Database layer sử dụng Table API (persistent, shared)
- * PayTrack Pro v3.0
- *
- * Tất cả dữ liệu lưu trên server qua RESTful Table API:
- *   GET/POST/PUT/PATCH/DELETE tables/{table}
- *
- * Tables: pt_users, pt_dossiers, pt_history,
- *         pt_notifications, pt_audit, pt_comments
- */
+/* ===========================
+   PayTrack Pro - Static Data Store
+   Simulates backend data layer
+   =========================== */
 
-const DB = (() => {
-  'use strict';
+window.DB = {
+  /* ---- USERS ---- */
+  users: [
+    { id:'u001', username:'admin', full_name:'Nguyễn Quản Trị', email:'admin@company.vn', password:'admin123', role:'admin', department:'admin', avatar:'NQ', is_active:true },
+    { id:'u002', username:'vt_tuan', full_name:'Trần Văn Tuấn', email:'tuan.vt@company.vn', password:'123456', role:'telecom_staff', department:'vien_thong', avatar:'TV', is_active:true },
+    { id:'u003', username:'vt_huong', full_name:'Lê Thị Hương', email:'huong.vt@company.vn', password:'123456', role:'telecom_staff', department:'vien_thong', avatar:'LH', is_active:true },
+    { id:'u004', username:'kd_minh', full_name:'Phạm Văn Minh', email:'minh.kd@company.vn', password:'123456', role:'business_staff', department:'kinh_doanh', avatar:'PM', is_active:true },
+    { id:'u005', username:'kd_lan', full_name:'Nguyễn Thị Lan', email:'lan.kd@company.vn', password:'123456', role:'business_staff', department:'kinh_doanh', avatar:'NL', is_active:true },
+    { id:'u006', username:'kt_hung', full_name:'Đỗ Quốc Hùng', email:'hung.kt@company.vn', password:'123456', role:'accounting_staff', department:'ke_toan', avatar:'DH', is_active:true },
+    { id:'u007', username:'kt_mai', full_name:'Vũ Thị Mai', email:'mai.kt@company.vn', password:'123456', role:'accounting_staff', department:'ke_toan', avatar:'VM', is_active:true },
+  ],
 
-  /* ─── Workflow Definition ─── */
-  const WORKFLOW_STEPS = [
-    { id: 'created',            label: 'Đã tạo',          icon: 'fa-plus-circle',     color: '#6c757d' },
-    { id: 'submitted',          label: 'Đã nộp',           icon: 'fa-paper-plane',     color: '#007bff' },
-    { id: 'verified',           label: 'Đã xác minh',      icon: 'fa-check-double',    color: '#17a2b8' },
-    { id: 'sent_to_accounting', label: 'Gửi Kế toán',      icon: 'fa-share-square',    color: '#fd7e14' },
-    { id: 'approved',           label: 'Đã duyệt',         icon: 'fa-thumbs-up',       color: '#28a745' },
-    { id: 'paid',               label: 'Đã thanh toán',    icon: 'fa-money-bill-wave', color: '#20c997' },
-    { id: 'archived',           label: 'Lưu trữ',          icon: 'fa-archive',         color: '#6f42c1' }
-  ];
-
-  const STATUS_TRANSITIONS = {
-    created:            ['submitted'],
-    submitted:          ['verified', 'created'],
-    verified:           ['sent_to_accounting', 'submitted'],
-    sent_to_accounting: ['approved', 'verified'],
-    approved:           ['paid', 'sent_to_accounting'],
-    paid:               ['archived'],
-    archived:           []
-  };
-
-  /* ─── API Base ─── */
-  async function apiFetch(path, method = 'GET', body = null) {
-    const opts = {
-      method,
-      headers: { 'Content-Type': 'application/json' }
-    };
-    if (body !== null) opts.body = JSON.stringify(body);
-    const res = await fetch(path, opts);
-    if (res.status === 204) return null;
-    return res.json();
-  }
-
-  /* ─── Generic helpers ─── */
-  async function listAll(table, params = '') {
-    const r = await apiFetch(`tables/${table}?limit=500${params}`);
-    return r?.data || [];
-  }
-
-  /* ─── Find the Table API's internal UUID for a business-id record ─── */
-  async function findApiId(table, businessId, field = 'id') {
-    // The Table API record's primary key is stored as `id` from the API perspective,
-    // but our seeded data stores business IDs in the `id` field.
-    // We search for a row where the field matches, then use its API-level record id.
-    const rows = await listAll(table);
-    const found = rows.find(r => r[field] === businessId);
-    // Table API returns its own UUID as `id` in all responses,
-    // but since we POST with our own `id`, the API id == our business id in most cases.
-    // However for safety we use the row directly.
-    return found ? found : null;
-  }
-
-  async function createRow(table, data) {
-    return apiFetch(`tables/${table}`, 'POST', data);
-  }
-
-  async function updateRow(table, rowId, data) {
-    return apiFetch(`tables/${table}/${rowId}`, 'PATCH', data);
-  }
-
-  async function deleteRow(table, rowId) {
-    return apiFetch(`tables/${table}/${rowId}`, 'DELETE');
-  }
-
-  /* ─── ID Generation ─── */
-  function genId(prefix = '') {
-    return prefix + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-  }
-
-  async function nextDossierId() {
-    const all = await listAll('pt_dossiers', '&sort=dossierId');
-    const nums = all.map(d => parseInt((d.dossierId || d.id || '0').replace('DOS-', '')) || 0);
-    const max  = nums.length ? Math.max(...nums) : 0;
-    return `DOS-${String(max + 1).padStart(3, '0')}`;
-  }
-
-  /* ─── Cache layer (in-memory, 30s TTL) ─── */
-  const _cache = {};
-  function getCache(key) {
-    const c = _cache[key];
-    if (c && Date.now() - c.t < 30000) return c.v;
-    return null;
-  }
-  function setCache(key, val) { _cache[key] = { v: val, t: Date.now() }; }
-  function invalidate(key) { delete _cache[key]; }
-  function invalidateAll() { Object.keys(_cache).forEach(k => delete _cache[k]); }
-
-  /* ─── Password init ─── */
-  // Nếu passwordHash bắt đầu bằng __plain__ thì hash và update
-  async function ensurePasswordHashed(user) {
-    if (user.passwordHash && user.passwordHash.startsWith('__plain__')) {
-      const plain = user.passwordHash.replace('__plain__', '');
-      const hash  = await Security.Password.hash(plain);
-      await updateRow('pt_users', user.id, { passwordHash: hash });
-      user.passwordHash = hash;
+  /* ---- DOSSIERS ---- */
+  dossiers: [
+    {
+      id:'d001', dossier_code:'HS-2024-001',
+      project_name:'Nâng cấp hạ tầng mạng 5G khu vực Hà Nội',
+      contract_number:'HĐ-VT-2024-001', department:'vien_thong',
+      created_by_id:'u002', created_by_name:'Trần Văn Tuấn',
+      assigned_to_id:'u006', assigned_to_name:'Đỗ Quốc Hùng',
+      assigned_department:'ke_toan',
+      status:'approved', priority:'high', amount:2500000000,
+      deadline:'2024-04-15T17:00:00Z',
+      description:'Dự án nâng cấp hạ tầng mạng 5G cho khu vực nội thành Hà Nội, bao gồm 50 trạm BTS mới và hệ thống truyền dẫn quang.',
+      notes:'Ưu tiên xử lý ngay do deadline cuối tháng. Đã có đủ hồ sơ nghiệm thu.',
+      tags:['5G','hạ tầng','Hà Nội'],
+      is_deleted:false, created_at:'2024-03-20T08:00:00Z'
+    },
+    {
+      id:'d002', dossier_code:'HS-2024-002',
+      project_name:'Triển khai hệ thống FTTH tại TP.HCM',
+      contract_number:'HĐ-VT-2024-002', department:'vien_thong',
+      created_by_id:'u004', created_by_name:'Phạm Văn Minh',
+      assigned_to_id:'u002', assigned_to_name:'Trần Văn Tuấn',
+      assigned_department:'vien_thong',
+      status:'verified', priority:'high', amount:1800000000,
+      deadline:'2024-04-20T17:00:00Z',
+      description:'Dự án triển khai cáp quang FTTH cho 10,000 hộ gia đình tại TP.HCM, giai đoạn 1.',
+      notes:'Đã hoàn thiện hồ sơ kỹ thuật. Chờ xác nhận từ phòng Viễn thông.',
+      tags:['FTTH','TP.HCM','cáp quang'],
+      is_deleted:false, created_at:'2024-03-22T09:00:00Z'
+    },
+    {
+      id:'d003', dossier_code:'HS-2024-003',
+      project_name:'Mua sắm thiết bị viễn thông Q2/2024',
+      contract_number:'HĐ-KD-2024-003', department:'kinh_doanh',
+      created_by_id:'u004', created_by_name:'Phạm Văn Minh',
+      assigned_to_id:'u003', assigned_to_name:'Lê Thị Hương',
+      assigned_department:'vien_thong',
+      status:'submitted', priority:'medium', amount:950000000,
+      deadline:'2024-04-30T17:00:00Z',
+      description:'Mua sắm thiết bị switch, router và các phụ kiện viễn thông cho quý 2.',
+      notes:'',
+      tags:['thiết bị','mua sắm'],
+      is_deleted:false, created_at:'2024-03-25T10:00:00Z'
+    },
+    {
+      id:'d004', dossier_code:'HS-2024-004',
+      project_name:'Thanh lý hợp đồng dịch vụ internet doanh nghiệp',
+      contract_number:'HĐ-KD-2024-004', department:'kinh_doanh',
+      created_by_id:'u005', created_by_name:'Nguyễn Thị Lan',
+      assigned_to_id:'u005', assigned_to_name:'Nguyễn Thị Lan',
+      assigned_department:'kinh_doanh',
+      status:'created', priority:'low', amount:320000000,
+      deadline:'2024-05-15T17:00:00Z',
+      description:'Thanh lý và quyết toán hợp đồng dịch vụ internet cho 200 doanh nghiệp vừa và nhỏ.',
+      notes:'Cần bổ sung thêm biên bản nghiệm thu từ khách hàng.',
+      tags:['internet','doanh nghiệp','thanh lý'],
+      is_deleted:false, created_at:'2024-03-28T14:00:00Z'
+    },
+    {
+      id:'d005', dossier_code:'HS-2024-005',
+      project_name:'Thanh toán dịch vụ cloud hosting năm 2024',
+      contract_number:'HĐ-VT-2024-005', department:'vien_thong',
+      created_by_id:'u002', created_by_name:'Trần Văn Tuấn',
+      assigned_to_id:'u007', assigned_to_name:'Vũ Thị Mai',
+      assigned_department:'ke_toan',
+      status:'paid', priority:'high', amount:4200000000,
+      deadline:'2024-03-31T17:00:00Z',
+      description:'Thanh toán phí dịch vụ cloud hosting và backup dữ liệu cho toàn bộ hệ thống năm 2024.',
+      notes:'Đã chuyển khoản thành công ngày 31/03/2024. Số chứng từ: CT-2024-0331.',
+      tags:['cloud','hosting','2024'],
+      is_deleted:false, created_at:'2024-03-10T08:00:00Z'
+    },
+    {
+      id:'d006', dossier_code:'HS-2024-006',
+      project_name:'Bảo trì hệ thống truyền dẫn quang miền Bắc',
+      contract_number:'HĐ-VT-2024-006', department:'vien_thong',
+      created_by_id:'u003', created_by_name:'Lê Thị Hương',
+      assigned_to_id:'u006', assigned_to_name:'Đỗ Quốc Hùng',
+      assigned_department:'ke_toan',
+      status:'sent_accounting', priority:'medium', amount:780000000,
+      deadline:'2024-04-25T17:00:00Z',
+      description:'Bảo trì định kỳ hệ thống truyền dẫn quang cho khu vực miền Bắc, 15 tuyến cáp.',
+      notes:'Đã nghiệm thu kỹ thuật xong. Chờ kế toán phê duyệt.',
+      tags:['bảo trì','quang','miền Bắc'],
+      is_deleted:false, created_at:'2024-03-18T11:00:00Z'
+    },
+    {
+      id:'d007', dossier_code:'HS-2024-007',
+      project_name:'Hợp đồng cung cấp SIM doanh nghiệp Samsung',
+      contract_number:'HĐ-KD-2024-007', department:'kinh_doanh',
+      created_by_id:'u004', created_by_name:'Phạm Văn Minh',
+      assigned_to_id:'u004', assigned_to_name:'Phạm Văn Minh',
+      assigned_department:'kinh_doanh',
+      status:'created', priority:'medium', amount:150000000,
+      deadline:'2024-05-30T17:00:00Z',
+      description:'Cung cấp 5000 SIM doanh nghiệp cho đối tác tập đoàn Samsung Việt Nam.',
+      notes:'',
+      tags:['SIM','doanh nghiệp','Samsung'],
+      is_deleted:false, created_at:'2024-03-30T09:00:00Z'
+    },
+    {
+      id:'d008', dossier_code:'HS-2024-008',
+      project_name:'Quyết toán dự án số hóa bưu điện tỉnh',
+      contract_number:'HĐ-VT-2024-008', department:'vien_thong',
+      created_by_id:'u002', created_by_name:'Trần Văn Tuấn',
+      assigned_to_id:'u006', assigned_to_name:'Đỗ Quốc Hùng',
+      assigned_department:'ke_toan',
+      status:'archived', priority:'low', amount:680000000,
+      deadline:'2024-03-01T17:00:00Z',
+      description:'Quyết toán và lưu trữ dự án số hóa 63 bưu điện tỉnh thành trên cả nước.',
+      notes:'Hoàn thành và lưu trữ. Hồ sơ đã được số hóa và upload lên hệ thống.',
+      tags:['số hóa','bưu điện','quyết toán'],
+      is_deleted:false, created_at:'2024-02-01T08:00:00Z'
+    },
+    {
+      id:'d009', dossier_code:'HS-2024-009',
+      project_name:'Nâng cấp tổng đài IP-PBX trụ sở chính',
+      contract_number:'HĐ-VT-2024-009', department:'vien_thong',
+      created_by_id:'u003', created_by_name:'Lê Thị Hương',
+      assigned_to_id:'u003', assigned_to_name:'Lê Thị Hương',
+      assigned_department:'vien_thong',
+      status:'submitted', priority:'high', amount:1200000000,
+      deadline:'2024-04-10T17:00:00Z',
+      description:'Nâng cấp hệ thống tổng đài IP-PBX và tích hợp call center tại trụ sở chính.',
+      notes:'',
+      tags:['IP-PBX','tổng đài','call center'],
+      is_deleted:false, created_at:'2024-03-26T10:00:00Z'
+    },
+    {
+      id:'d010', dossier_code:'HS-2024-010',
+      project_name:'Thuê kênh truyền số liệu quốc tế',
+      contract_number:'HĐ-KD-2024-010', department:'kinh_doanh',
+      created_by_id:'u005', created_by_name:'Nguyễn Thị Lan',
+      assigned_to_id:'u007', assigned_to_name:'Vũ Thị Mai',
+      assigned_department:'ke_toan',
+      status:'approved', priority:'high', amount:3600000000,
+      deadline:'2024-04-05T17:00:00Z',
+      description:'Thuê kênh truyền số liệu quốc tế kết nối Việt Nam - Singapore - USA, băng thông 10Gbps.',
+      notes:'',
+      tags:['quốc tế','kênh truyền','băng thông'],
+      is_deleted:false, created_at:'2024-03-15T08:00:00Z'
     }
-    return user;
+  ],
+
+  /* ---- AUDIT LOGS ---- */
+  auditLogs: [
+    { id:'al001', dossier_id:'d001', dossier_code:'HS-2024-001', user_id:'u002', user_name:'Trần Văn Tuấn', user_role:'telecom_staff', action:'create', field_changed:'status', old_value:null, new_value:'created', comment:'Tạo hồ sơ mới - Nâng cấp 5G HN', timestamp:'2024-03-20T08:00:00Z' },
+    { id:'al002', dossier_id:'d001', dossier_code:'HS-2024-001', user_id:'u002', user_name:'Trần Văn Tuấn', user_role:'telecom_staff', action:'status_change', field_changed:'status', old_value:'created', new_value:'submitted', comment:'Chuyển sang Viễn thông xác thực', timestamp:'2024-03-21T09:30:00Z' },
+    { id:'al003', dossier_id:'d001', dossier_code:'HS-2024-001', user_id:'u002', user_name:'Trần Văn Tuấn', user_role:'telecom_staff', action:'status_change', field_changed:'status', old_value:'submitted', new_value:'verified', comment:'Đã xác minh hồ sơ hợp lệ, đầy đủ chứng từ', timestamp:'2024-03-25T14:00:00Z' },
+    { id:'al004', dossier_id:'d001', dossier_code:'HS-2024-001', user_id:'u002', user_name:'Trần Văn Tuấn', user_role:'telecom_staff', action:'status_change', field_changed:'status', old_value:'verified', new_value:'sent_accounting', comment:'Chuyển sang Kế toán phê duyệt', timestamp:'2024-03-28T10:00:00Z' },
+    { id:'al005', dossier_id:'d001', dossier_code:'HS-2024-001', user_id:'u006', user_name:'Đỗ Quốc Hùng', user_role:'accounting_staff', action:'status_change', field_changed:'status', old_value:'sent_accounting', new_value:'approved', comment:'Phê duyệt thanh toán - đã kiểm tra hồ sơ đầy đủ', timestamp:'2024-04-01T11:00:00Z' },
+    { id:'al006', dossier_id:'d005', dossier_code:'HS-2024-005', user_id:'u002', user_name:'Trần Văn Tuấn', user_role:'telecom_staff', action:'create', field_changed:'status', old_value:null, new_value:'created', comment:'Tạo hồ sơ thanh toán cloud hosting', timestamp:'2024-03-10T08:00:00Z' },
+    { id:'al007', dossier_id:'d005', dossier_code:'HS-2024-005', user_id:'u007', user_name:'Vũ Thị Mai', user_role:'accounting_staff', action:'status_change', field_changed:'status', old_value:'approved', new_value:'paid', comment:'Đã chuyển khoản thành công ngày 31/03/2024. Số CT: CT-2024-0331', timestamp:'2024-03-31T15:30:00Z' },
+    { id:'al008', dossier_id:'d002', dossier_code:'HS-2024-002', user_id:'u004', user_name:'Phạm Văn Minh', user_role:'business_staff', action:'create', field_changed:'status', old_value:null, new_value:'created', comment:'Tạo hồ sơ FTTH TP.HCM', timestamp:'2024-03-22T09:00:00Z' },
+    { id:'al009', dossier_id:'d002', dossier_code:'HS-2024-002', user_id:'u004', user_name:'Phạm Văn Minh', user_role:'business_staff', action:'status_change', field_changed:'status', old_value:'created', new_value:'submitted', comment:'Nộp hồ sơ cho phòng Viễn thông xem xét', timestamp:'2024-03-24T10:00:00Z' },
+    { id:'al010', dossier_id:'d002', dossier_code:'HS-2024-002', user_id:'u002', user_name:'Trần Văn Tuấn', user_role:'telecom_staff', action:'status_change', field_changed:'status', old_value:'submitted', new_value:'verified', comment:'Xác minh hồ sơ FTTH - đạt yêu cầu kỹ thuật', timestamp:'2024-03-30T14:00:00Z' },
+    { id:'al011', dossier_id:'d006', dossier_code:'HS-2024-006', user_id:'u003', user_name:'Lê Thị Hương', user_role:'telecom_staff', action:'create', field_changed:'status', old_value:null, new_value:'created', comment:'Tạo hồ sơ bảo trì quang miền Bắc', timestamp:'2024-03-18T11:00:00Z' },
+    { id:'al012', dossier_id:'d006', dossier_code:'HS-2024-006', user_id:'u003', user_name:'Lê Thị Hương', user_role:'telecom_staff', action:'status_change', field_changed:'status', old_value:'created', new_value:'submitted', comment:'Nộp hồ sơ', timestamp:'2024-03-20T09:00:00Z' },
+    { id:'al013', dossier_id:'d006', dossier_code:'HS-2024-006', user_id:'u002', user_name:'Trần Văn Tuấn', user_role:'telecom_staff', action:'status_change', field_changed:'status', old_value:'submitted', new_value:'verified', comment:'Đã kiểm tra và xác nhận', timestamp:'2024-03-25T15:00:00Z' },
+    { id:'al014', dossier_id:'d006', dossier_code:'HS-2024-006', user_id:'u002', user_name:'Trần Văn Tuấn', user_role:'telecom_staff', action:'status_change', field_changed:'status', old_value:'verified', new_value:'sent_accounting', comment:'Chuyển Kế toán', timestamp:'2024-03-28T16:00:00Z' },
+    { id:'al015', dossier_id:'d008', dossier_code:'HS-2024-008', user_id:'u006', user_name:'Đỗ Quốc Hùng', user_role:'accounting_staff', action:'status_change', field_changed:'status', old_value:'paid', new_value:'archived', comment:'Lưu trữ hồ sơ hoàn thành', timestamp:'2024-03-15T10:00:00Z' },
+  ],
+
+  /* ---- COMMENTS ---- */
+  comments: [
+    { id:'c001', dossier_id:'d001', user_id:'u006', user_name:'Đỗ Quốc Hùng', user_role:'accounting_staff', content:'Hồ sơ đã đầy đủ. Tôi sẽ xem xét và phê duyệt trong ngày hôm nay.', is_internal:false, created_at:'2024-04-01T10:00:00Z' },
+    { id:'c002', dossier_id:'d001', user_id:'u002', user_name:'Trần Văn Tuấn', user_role:'telecom_staff', content:'Cảm ơn! Vui lòng ưu tiên vì đây là dự án quan trọng cần thanh toán trước 15/04.', is_internal:false, created_at:'2024-04-01T10:30:00Z' },
+    { id:'c003', dossier_id:'d002', user_id:'u004', user_name:'Phạm Văn Minh', user_role:'business_staff', content:'Bổ sung thêm biên bản nghiệm thu giai đoạn 1 đính kèm.', is_internal:false, created_at:'2024-03-23T11:00:00Z' },
+    { id:'c004', dossier_id:'d003', user_id:'u003', user_name:'Lê Thị Hương', user_role:'telecom_staff', content:'Cần kiểm tra lại danh sách thiết bị - một số model không còn sản xuất.', is_internal:true, created_at:'2024-03-26T14:00:00Z' },
+  ],
+
+  /* ---- NOTIFICATIONS ---- */
+  notifications: [
+    { id:'n001', user_id:'u006', dossier_id:'d001', dossier_code:'HS-2024-001', type:'assignment', title:'Hồ sơ mới được giao', message:'Hồ sơ HS-2024-001 "Nâng cấp 5G HN" đã được giao cho bạn phê duyệt.', is_read:false, priority:'high', created_at:'2024-03-28T10:00:00Z' },
+    { id:'n002', user_id:'u004', dossier_id:'d003', dossier_code:'HS-2024-003', type:'deadline', title:'Deadline sắp đến hạn', message:'Hồ sơ HS-2024-003 sẽ hết hạn vào ngày 30/04/2024. Vui lòng xử lý sớm.', is_read:false, priority:'high', created_at:'2024-04-01T08:00:00Z' },
+    { id:'n003', user_id:'u002', dossier_id:'d002', dossier_code:'HS-2024-002', type:'status_change', title:'Trạng thái hồ sơ thay đổi', message:'HS-2024-002 đã được xác minh (Verified) bởi Trần Văn Tuấn.', is_read:true, priority:'medium', created_at:'2024-03-30T14:00:00Z' },
+    { id:'n004', user_id:'u001', dossier_id:'d005', dossier_code:'HS-2024-005', type:'approval', title:'Thanh toán hoàn tất', message:'HS-2024-005 "Cloud hosting 2024" đã được thanh toán thành công.', is_read:false, priority:'medium', created_at:'2024-03-31T15:30:00Z' },
+    { id:'n005', user_id:'u006', dossier_id:'d006', dossier_code:'HS-2024-006', type:'assignment', title:'Hồ sơ chờ phê duyệt', message:'HS-2024-006 "Bảo trì quang miền Bắc" đã được chuyển sang Kế toán xử lý.', is_read:false, priority:'medium', created_at:'2024-03-28T16:00:00Z' },
+  ],
+
+  /* ---- COUNTERS ---- */
+  _dossierCounter: 10,
+  _userCounter: 7,
+
+  /* ---- HELPERS ---- */
+  getNextDossierCode() {
+    this._dossierCounter++;
+    return `HS-2024-${String(this._dossierCounter).padStart(3,'0')}`;
+  },
+  getNextId(prefix) {
+    if (prefix==='d') { return 'd' + (this.dossiers.length + 1).toString().padStart(3,'0'); }
+    if (prefix==='u') { this._userCounter++; return 'u' + String(this._userCounter).padStart(3,'0'); }
+    return prefix + Date.now();
+  },
+  newId() { return Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
+};
+
+/* ---- WORKFLOW CONFIG ---- */
+window.WORKFLOW = {
+  steps: [
+    { key:'created',         label:'Khởi tạo',       icon:'fa-plus',          color:'#64748b' },
+    { key:'submitted',       label:'Nộp hồ sơ',      icon:'fa-paper-plane',   color:'#2563eb' },
+    { key:'verified',        label:'Xác minh',        icon:'fa-check-circle',  color:'#0891b2' },
+    { key:'sent_accounting', label:'Chuyển Kế toán',  icon:'fa-exchange-alt',  color:'#7c3aed' },
+    { key:'approved',        label:'Phê duyệt',       icon:'fa-thumbs-up',     color:'#059669' },
+    { key:'paid',            label:'Đã thanh toán',   icon:'fa-money-check',   color:'#16a34a' },
+    { key:'archived',        label:'Lưu trữ',         icon:'fa-archive',       color:'#374151' },
+  ],
+
+  /* Which transitions are allowed per role */
+  transitions: {
+    admin: {
+      created:         ['submitted','archived'],
+      submitted:       ['verified','created','archived'],
+      verified:        ['sent_accounting','submitted','archived'],
+      sent_accounting: ['approved','verified','archived'],
+      approved:        ['paid','sent_accounting','archived'],
+      paid:            ['archived'],
+      archived:        []
+    },
+    telecom_staff: {
+      created:         ['submitted'],
+      submitted:       ['verified','created'],
+      verified:        ['sent_accounting'],
+      sent_accounting: [],
+      approved:        [],
+      paid:            [],
+      archived:        []
+    },
+    business_staff: {
+      created:         ['submitted'],
+      submitted:       ['created'],
+      verified:        [],
+      sent_accounting: [],
+      approved:        [],
+      paid:            [],
+      archived:        []
+    },
+    accounting_staff: {
+      created:         [],
+      submitted:       [],
+      verified:        [],
+      sent_accounting: ['approved','verified'],
+      approved:        ['paid'],
+      paid:            ['archived'],
+      archived:        []
+    }
+  },
+
+  getStepIndex(key) { return this.steps.findIndex(s=>s.key===key); },
+  getStep(key) { return this.steps.find(s=>s.key===key); },
+
+  allowedTransitions(role, currentStatus) {
+    return (this.transitions[role]?.[currentStatus]) || [];
   }
+};
 
-  /* ─── USERS ─── */
-  const users = {
-    async getAll() {
-      const cached = getCache('users');
-      if (cached) return cached;
-      const rows = await listAll('pt_users');
-      const list = rows.filter(u => !u.deleted);
-      setCache('users', list);
-      return list;
-    },
+/* ---- ROLE LABELS ---- */
+window.ROLE_LABELS = {
+  admin: 'Quản trị viên',
+  telecom_staff: 'Nhân viên Viễn thông',
+  business_staff: 'Nhân viên Kinh doanh',
+  accounting_staff: 'Nhân viên Kế toán',
+};
 
-    async getById(id) {
-      const all = await this.getAll();
-      return all.find(u => u.id === id) || null;
-    },
+window.DEPT_LABELS = {
+  vien_thong: 'Phòng Viễn thông',
+  kinh_doanh: 'Phòng Kinh doanh',
+  ke_toan: 'Phòng Kế toán',
+  admin: 'Quản trị',
+};
 
-    async getByUsername(username) {
-      const all = await this.getAll();
-      const user = all.find(u => u.username === username && u.active !== false);
-      if (!user) return null;
-      return ensurePasswordHashed(user);
-    },
+window.STATUS_LABELS = {
+  created: 'Khởi tạo',
+  submitted: 'Đã nộp',
+  verified: 'Đã xác minh',
+  sent_accounting: 'Chờ kế toán',
+  approved: 'Đã phê duyệt',
+  paid: 'Đã thanh toán',
+  archived: 'Lưu trữ',
+};
 
-    async create(data) {
-      const row = await createRow('pt_users', data);
-      invalidate('users');
-      return row;
-    },
-
-    async update(id, data) {
-      // id có thể là business-id (u001) hoặc API UUID
-      const all   = await listAll('pt_users');
-      // Tìm theo trường 'id' (business id) hoặc trực tiếp bằng API UUID
-      const found = all.find(u => u.id === id);
-      if (!found) return null;
-      // Dùng API UUID của record (nếu API trả về gs_id hoặc id khác business id)
-      // Table API thực sự dùng chính trường 'id' làm PK khi seeded với id tường minh
-      const row = await updateRow('pt_users', found.id, data);
-      invalidate('users');
-      return row;
-    },
-
-    async delete(id) {
-      await this.update(id, { deleted: true, active: false });
-      invalidate('users');
-    }
-  };
-
-  /* ─── DOSSIERS ─── */
-  const dossiers = {
-    async getAll() {
-      const cached = getCache('dossiers');
-      if (cached) return cached;
-      const rows = await listAll('pt_dossiers');
-      const list = rows.filter(d => !d.deleted);
-      setCache('dossiers', list);
-      return list;
-    },
-
-    async getById(id) {
-      const all = await this.getAll();
-      return all.find(d => d.dossierId === id || d.id === id) || null;
-    },
-
-    async create(data) {
-      const dossierId = await nextDossierId();
-      const row = await createRow('pt_dossiers', {
-        ...data,
-        dossierId,
-        id: dossierId,
-        status: 'created',
-        deleted: false
-      });
-      invalidate('dossiers');
-      return { ...row, dossierId: row.dossierId || dossierId };
-    },
-
-    async update(id, data) {
-      const all   = await listAll('pt_dossiers');
-      const found = all.find(d => d.dossierId === id || d.id === id);
-      if (!found) return null;
-      // Sử dụng dossierId hoặc id của record tìm được
-      const apiId = found.id;
-      const row = await updateRow('pt_dossiers', apiId, data);
-      invalidate('dossiers');
-      return row;
-    },
-
-    async delete(id) {
-      await this.update(id, { deleted: true });
-      invalidate('dossiers');
-    }
-  };
-
-  /* ─── WORKFLOW HISTORY ─── */
-  const workflow = {
-    canTransition(currentStatus, targetStatus, userRole) {
-      const allowed = STATUS_TRANSITIONS[currentStatus] || [];
-      if (!allowed.includes(targetStatus)) return { ok: false, reason: 'Chuyển trạng thái không hợp lệ' };
-
-      const roleMap = {
-        created:            ['all'],
-        submitted:          ['business', 'telecom', 'admin'],
-        verified:           ['telecom', 'admin'],
-        sent_to_accounting: ['telecom', 'admin'],
-        approved:           ['accounting', 'admin'],
-        paid:               ['accounting', 'admin'],
-        archived:           ['accounting', 'admin']
-      };
-      const allowed2 = roleMap[targetStatus] || [];
-      if (!allowed2.includes('all') && !allowed2.includes(userRole)) {
-        return { ok: false, reason: `Vai trò của bạn không được phép chuyển sang trạng thái này` };
-      }
-      return { ok: true };
-    },
-
-    getSteps:    () => WORKFLOW_STEPS,
-    getNextSteps: (status) => STATUS_TRANSITIONS[status] || [],
-
-    async getHistory(dossierId) {
-      const rows = await listAll('pt_history', `&search=${dossierId}`);
-      return rows
-        .filter(h => h.dossierId === dossierId)
-        .sort((a, b) => new Date(a.ts) - new Date(b.ts));
-    },
-
-    async transition(dossierId, newStatus, actorId, note) {
-      const dossier = await dossiers.getById(dossierId);
-      if (!dossier) return { ok: false, reason: 'Không tìm thấy hồ sơ' };
-
-      const ts = new Date().toISOString();
-      const entry = await createRow('pt_history', {
-        id: genId('h'),
-        dossierId,
-        status: newStatus,
-        actorId,
-        note: note || '',
-        ts
-      });
-      await dossiers.update(dossierId, { status: newStatus });
-      invalidate('dossiers');
-      return { ok: true, entry };
-    }
-  };
-
-  /* ─── NOTIFICATIONS ─── */
-  const notifications = {
-    async getByUser(userId) {
-      const rows = await listAll('pt_notifications');
-      return rows
-        .filter(n => n.userId === userId)
-        .sort((a, b) => new Date(b.ts) - new Date(a.ts));
-    },
-
-    async getUnreadCount(userId) {
-      const all = await this.getByUser(userId);
-      return all.filter(n => !n.read).length;
-    },
-
-    async create(data) {
-      return createRow('pt_notifications', {
-        id: genId('n'),
-        ts: new Date().toISOString(),
-        read: false,
-        ...data
-      });
-    },
-
-    async markRead(recordId) {
-      return updateRow('pt_notifications', recordId, { read: true });
-    },
-
-    async markAllRead(userId) {
-      const all = await this.getByUser(userId);
-      await Promise.all(
-        all.filter(n => !n.read).map(n => updateRow('pt_notifications', n.id, { read: true }))
-      );
-    },
-
-    async delete(recordId) {
-      return deleteRow('pt_notifications', recordId);
-    }
-  };
-
-  /* ─── AUDIT LOGS ─── */
-  const auditLogs = {
-    async getAll(limit = 100) {
-      const rows = await listAll('pt_audit');
-      return rows
-        .sort((a, b) => new Date(b.ts) - new Date(a.ts))
-        .slice(0, limit);
-    },
-
-    async getByDossier(dossierId) {
-      const rows = await listAll('pt_audit');
-      return rows
-        .filter(l => l.target === dossierId)
-        .sort((a, b) => new Date(b.ts) - new Date(a.ts));
-    },
-
-    async log(userId, action, target, targetType, details) {
-      return createRow('pt_audit', {
-        id: genId('al'),
-        userId: userId || '',
-        action,
-        target: target || '',
-        targetType: targetType || '',
-        details: JSON.stringify(details || {}),
-        ts: new Date().toISOString()
-      });
-    }
-  };
-
-  /* ─── COMMENTS ─── */
-  const comments = {
-    async getByDossier(dossierId) {
-      const rows = await listAll('pt_comments');
-      return rows
-        .filter(c => c.dossierId === dossierId)
-        .sort((a, b) => new Date(a.ts) - new Date(b.ts));
-    },
-
-    async add(dossierId, userId, text) {
-      return createRow('pt_comments', {
-        id: genId('c'),
-        dossierId,
-        userId,
-        text,
-        ts: new Date().toISOString()
-      });
-    },
-
-    async delete(commentApiId) {
-      return deleteRow('pt_comments', commentApiId);
-    }
-  };
-
-  /* ─── STATS ─── */
-  const stats = {
-    async byStatus() {
-      const all = await dossiers.getAll();
-      const result = {};
-      WORKFLOW_STEPS.forEach(s => { result[s.id] = 0; });
-      all.forEach(d => { if (result[d.status] !== undefined) result[d.status]++; });
-      return result;
-    },
-
-    async byDepartment() {
-      const all = await dossiers.getAll();
-      const result = { telecom: 0, business: 0, accounting: 0 };
-      all.forEach(d => { if (result[d.department] !== undefined) result[d.department]++; });
-      return result;
-    },
-
-    async totalAmount() {
-      const all = await dossiers.getAll();
-      return all.reduce((s, d) => s + (Number(d.amount) || 0), 0);
-    },
-
-    async overdue() {
-      const all  = await dossiers.getAll();
-      const today = Date.now();
-      return all.filter(d =>
-        d.deadline &&
-        new Date(d.deadline).getTime() < today &&
-        !['paid', 'archived'].includes(d.status)
-      );
-    }
-  };
-
-  /* ─── Public API ─── */
-  return {
-    WORKFLOW_STEPS,
-    STATUS_TRANSITIONS,
-    users,
-    dossiers,
-    workflow,
-    notifications,
-    auditLogs,
-    comments,
-    stats,
-    invalidateAll,
-    // helper cho auth
-    _ensurePasswords: async () => {
-      const all = await listAll('pt_users');
-      for (const u of all) {
-        if (u.passwordHash?.startsWith('__plain__')) {
-          await ensurePasswordHashed(u);
-        }
-      }
-      invalidate('users');
-    }
-  };
-})();
-
-window.DB = DB;
+window.PRIORITY_LABELS = {
+  low: 'Thấp', medium: 'Trung bình', high: 'Cao'
+};

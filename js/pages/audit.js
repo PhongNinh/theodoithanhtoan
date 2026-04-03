@@ -1,214 +1,140 @@
-/**
- * audit.js - Audit Log (nhật ký hoạt động) — async/await, Table API
- * PayTrack Pro v3.0
- */
+/* ===========================
+   Audit Log Page
+   =========================== */
 
-const PageAudit = (() => {
-  'use strict';
-  const e = Security.e;
+window.AuditPage = {
+  async render() {
+    document.getElementById('pageContainer').innerHTML = `<div class="loading"><div class="spinner"></div></div>`;
+    const logs = await API.getAuditLogs();
+    this._render(logs);
+  },
 
-  const ACTION_LABELS = {
-    USER_LOGIN:      { label: 'Đăng nhập',         icon: 'fa-sign-in-alt',  color: '#28a745' },
-    USER_LOGOUT:     { label: 'Đăng xuất',          icon: 'fa-sign-out-alt', color: '#6c757d' },
-    CREATE_DOSSIER:  { label: 'Tạo hồ sơ',          icon: 'fa-plus-circle',  color: '#007bff' },
-    UPDATE_DOSSIER:  { label: 'Sửa hồ sơ',          icon: 'fa-edit',         color: '#fd7e14' },
-    DELETE_DOSSIER:  { label: 'Xóa hồ sơ',          icon: 'fa-trash',        color: '#dc3545' },
-    STATUS_CHANGE:   { label: 'Đổi trạng thái',     icon: 'fa-exchange-alt', color: '#17a2b8' },
-    ADD_COMMENT:     { label: 'Thêm bình luận',      icon: 'fa-comment',      color: '#6f42c1' },
-    USER_CREATED:    { label: 'Tạo người dùng',      icon: 'fa-user-plus',    color: '#007bff' },
-    UPDATE_USER:     { label: 'Sửa người dùng',      icon: 'fa-user-edit',    color: '#fd7e14' },
-    DELETE_USER:     { label: 'Xóa người dùng',      icon: 'fa-user-minus',   color: '#dc3545' },
-    PASSWORD_CHANGE: { label: 'Đổi mật khẩu',        icon: 'fa-key',          color: '#e83e8c' },
-    LOGIN_FAILED:    { label: 'Đăng nhập thất bại',  icon: 'fa-times-circle', color: '#dc3545' }
-  };
+  _render(logs) {
+    const actionIcons = {
+      create: { icon:'fa-plus', cls:'ti-create', label:'Tạo mới' },
+      status_change: { icon:'fa-exchange-alt', cls:'ti-status_change', label:'Đổi trạng thái' },
+      comment: { icon:'fa-comment', cls:'ti-comment', label:'Bình luận' },
+      edit: { icon:'fa-edit', cls:'ti-edit', label:'Chỉnh sửa' },
+      delete: { icon:'fa-trash', cls:'ti-status_change', label:'Xóa' },
+      assign: { icon:'fa-user-tag', cls:'ti-assign', label:'Phân công' },
+    };
 
-  let _limit        = 50;
-  let _filterAction = '';
-  let _filterUser   = '';
-  let _search       = '';
-  let _allUsers     = [];  // cache users để lookup trong loadLogs
-
-  /* ─── Render khung (async) ─── */
-  async function render() {
-    if (!Auth.isLoggedIn()) return;
-
-    document.getElementById('mainContent').innerHTML =
-      `<div class="page-loader"><i class="fas fa-spinner fa-spin"></i> Đang tải...</div>`;
-
-    // Tải users một lần để dùng trong filter dropdown và lookup
-    _allUsers = await DB.users.getAll();
-    const actions = Object.entries(ACTION_LABELS);
-
-    const html = `
-<div class="audit-page">
-  <div class="page-header">
-    <h1 class="page-title"><i class="fas fa-history me-2"></i>Audit Log</h1>
-    <button class="btn btn-outline" onclick="PageAudit.exportLog()">
-      <i class="fas fa-download me-1"></i>Xuất CSV
-    </button>
-  </div>
-
-  <div class="filter-bar card mb-3">
-    <div class="filter-row">
-      <div class="filter-group">
-        <label>Loại hành động</label>
-        <select id="auditFilterAction" onchange="PageAudit.applyFilter()">
-          <option value="">Tất cả</option>
-          ${actions.map(([k, v]) =>
-            `<option value="${e(k)}" ${_filterAction === k ? 'selected' : ''}>${e(v.label)}</option>`
-          ).join('')}
-        </select>
+    document.getElementById('pageContainer').innerHTML = `
+      <div class="page-header">
+        <div>
+          <div class="page-title"><i class="fas fa-history" style="color:var(--primary)"></i> Audit Log</div>
+          <div class="page-subtitle">Lịch sử toàn bộ hoạt động — <strong>${logs.length}</strong> bản ghi (bất biến)</div>
+        </div>
+        <div class="page-actions">
+          <button class="btn btn-secondary" onclick="AuditPage.render()"><i class="fas fa-sync-alt"></i> Làm mới</button>
+          ${Auth.can('export') ? `<button class="btn btn-secondary" onclick="AuditPage.exportLogs()"><i class="fas fa-download"></i> Xuất Log</button>` : ''}
+        </div>
       </div>
-      <div class="filter-group">
-        <label>Người thực hiện</label>
-        <select id="auditFilterUser" onchange="PageAudit.applyFilter()">
-          <option value="">Tất cả</option>
-          ${_allUsers.map(u =>
-            `<option value="${e(u.id)}" ${_filterUser === u.id ? 'selected' : ''}>${e(u.displayName)}</option>`
-          ).join('')}
-        </select>
+
+      <!-- FILTERS -->
+      <div class="filters-bar">
+        <div class="filter-group">
+          <label>Thao tác</label>
+          <select id="auditFilter" onchange="AuditPage.filter()">
+            <option value="">Tất cả</option>
+            <option value="create">Tạo mới</option>
+            <option value="status_change">Đổi trạng thái</option>
+            <option value="comment">Bình luận</option>
+            <option value="edit">Chỉnh sửa</option>
+            <option value="delete">Xóa</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label>Người dùng</label>
+          <select id="auditUserFilter" onchange="AuditPage.filter()">
+            <option value="">Tất cả</option>
+            ${DB.users.map(u=>`<option value="${u.id}">${u.full_name}</option>`).join('')}
+          </select>
+        </div>
+        <div class="filter-group">
+          <label>Hồ sơ (mã)</label>
+          <input type="text" id="auditDossierFilter" placeholder="HS-2024-..." oninput="AuditPage.filter()" style="min-width:160px" />
+        </div>
       </div>
-      <div class="filter-group flex-1">
-        <label>Tìm kiếm (target ID)</label>
-        <input type="text" id="auditSearch" class="form-input"
-          placeholder="DOS-001, u001..." value="${e(_search)}" oninput="PageAudit.onSearchInput()">
+
+      <div class="card">
+        <div id="auditTimeline">
+          ${this._renderTimeline(logs, actionIcons)}
+        </div>
       </div>
-      <div class="filter-group">
-        <label>Hiển thị</label>
-        <select id="auditLimit" onchange="PageAudit.applyFilter()">
-          <option value="50"  ${_limit === 50  ? 'selected' : ''}>50 gần nhất</option>
-          <option value="100" ${_limit === 100 ? 'selected' : ''}>100 gần nhất</option>
-          <option value="200" ${_limit === 200 ? 'selected' : ''}>200 gần nhất</option>
-        </select>
-      </div>
-    </div>
-  </div>
+    `;
+    this._allLogs = logs;
+    this._actionIcons = actionIcons;
+  },
 
-  <div class="card" id="auditContainer">
-    <div class="loading-state"><i class="fas fa-spinner fa-spin"></i> Đang tải nhật ký...</div>
-  </div>
-</div>`;
+  filter() {
+    const action = document.getElementById('auditFilter')?.value;
+    const userId = document.getElementById('auditUserFilter')?.value;
+    const code = document.getElementById('auditDossierFilter')?.value?.toLowerCase();
 
-    document.getElementById('mainContent').innerHTML = html;
-    await loadLogs();
+    let filtered = this._allLogs;
+    if (action) filtered = filtered.filter(l=>l.action===action);
+    if (userId) filtered = filtered.filter(l=>l.user_id===userId);
+    if (code) filtered = filtered.filter(l=>l.dossier_code?.toLowerCase().includes(code));
+
+    document.getElementById('auditTimeline').innerHTML = this._renderTimeline(filtered, this._actionIcons);
+  },
+
+  _renderTimeline(logs, actionIcons) {
+    if (!logs.length) return `<div class="empty-state"><i class="fas fa-search"></i><h3>Không có kết quả</h3></div>`;
+
+    return `<div class="timeline">
+      ${logs.map(log => {
+        const ai = actionIcons[log.action] || { icon:'fa-circle', cls:'ti-edit', label:log.action };
+        return `
+          <div class="timeline-item">
+            <div class="timeline-icon ${ai.cls}"><i class="fas ${ai.icon}"></i></div>
+            <div class="timeline-content">
+              <div class="tl-header">
+                ${Utils.avatarHtml(log.user_name,28,10)}
+                <span class="tl-user">${log.user_name}</span>
+                <span class="tl-action">${ai.label}</span>
+                ${log.dossier_code ? `<a href="#" onclick="openDossierDetail('${log.dossier_id}');return false" class="td-code" style="font-size:12px">${log.dossier_code}</a>` : ''}
+                <span style="margin-left:auto;display:flex;align-items:center;gap:6px">
+                  ${Utils.roleBadge(log.user_role)}
+                  <span class="tl-time" title="${Utils.formatDateTime(log.timestamp)}">${Utils.timeAgo(log.timestamp)}</span>
+                </span>
+              </div>
+              ${log.old_value !== null && log.new_value && log.action==='status_change' ? `
+                <div class="tl-change mt-16" style="margin-top:8px">
+                  <span class="tl-old">${STATUS_LABELS[log.old_value]||log.old_value||'—'}</span>
+                  <span class="tl-arrow"><i class="fas fa-long-arrow-alt-right"></i></span>
+                  <span class="tl-new">${STATUS_LABELS[log.new_value]||log.new_value}</span>
+                </div>` : ''}
+              ${log.comment ? `<div class="tl-detail" style="margin-top:8px">${Utils.escapeHtml(log.comment)}</div>` : ''}
+              <div style="font-size:10px;color:var(--text-muted);margin-top:6px">
+                <i class="fas fa-clock"></i> ${Utils.formatDateTime(log.timestamp)}
+                <span style="margin-left:8px"><i class="fas fa-network-wired"></i> ${log.ip_address||'—'}</span>
+              </div>
+            </div>
+          </div>`;
+      }).join('')}
+    </div>`;
+  },
+
+  exportLogs() {
+    const headers = ['Thời gian','Người dùng','Vai trò','Thao tác','Hồ sơ','Trước','Sau','Ghi chú'];
+    const rows = (this._allLogs||[]).map(l=>[
+      Utils.formatDateTime(l.timestamp),
+      `"${l.user_name}"`,
+      ROLE_LABELS[l.user_role]||l.user_role,
+      l.action,
+      l.dossier_code||'',
+      STATUS_LABELS[l.old_value]||l.old_value||'',
+      STATUS_LABELS[l.new_value]||l.new_value||'',
+      `"${(l.comment||'').replace(/"/g,"'")}"`
+    ]);
+    const csv = [headers.join(','),...rows.map(r=>r.join(','))].join('\n');
+    const blob = new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href=url; a.download=`AuditLog_${Date.now()}.csv`; a.click();
+    URL.revokeObjectURL(url);
+    Toast.show('Thành công','Đã xuất Audit Log!','success');
   }
-
-  /* ─── Tải và hiển thị logs (async) ─── */
-  async function loadLogs() {
-    const container = document.getElementById('auditContainer');
-    if (!container) return;
-
-    container.innerHTML = `<div class="loading-state"><i class="fas fa-spinner fa-spin"></i> Đang tải...</div>`;
-
-    let logs = await DB.auditLogs.getAll(_limit);
-
-    if (_filterAction) logs = logs.filter(l => l.action === _filterAction);
-    if (_filterUser)   logs = logs.filter(l => l.userId === _filterUser);
-    if (_search)       logs = logs.filter(l =>
-      (l.target || '').toLowerCase().includes(_search.toLowerCase()));
-
-    if (!logs.length) {
-      container.innerHTML = `<div class="empty-state"><i class="fas fa-history"></i><p>Không có dữ liệu log</p></div>`;
-      return;
-    }
-
-    const html = `
-      <table class="table">
-        <thead>
-          <tr>
-            <th>Thời gian</th>
-            <th>Người thực hiện</th>
-            <th>Hành động</th>
-            <th>Đối tượng</th>
-            <th>Chi tiết</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${logs.map(log => {
-            const actor  = _allUsers.find(u => u.id === log.userId);
-            const action = ACTION_LABELS[log.action] || { label: log.action, icon: 'fa-circle', color: '#6c757d' };
-            const details = buildDetails(log);
-            const ts = log.ts || log.timestamp || log.created_at || '';
-
-            return `
-              <tr>
-                <td class="text-nowrap">${e(Utils.fmt.datetime(ts))}</td>
-                <td>
-                  ${actor
-                    ? `<div class="user-cell">
-                        <div class="avatar-xs" style="background:${e(actor.color || '#6c757d')}">${e(actor.avatar || '?')}</div>
-                        <span>${e(actor.displayName)}</span>
-                       </div>`
-                    : `<span class="text-muted">${e(log.userId || 'Hệ thống')}</span>`}
-                </td>
-                <td>
-                  <span style="color:${e(action.color)}">
-                    <i class="fas ${e(action.icon)} me-1"></i>${e(action.label)}
-                  </span>
-                </td>
-                <td>
-                  ${log.target ? `<span class="mono">${e(log.target)}</span>` : '—'}
-                  <span class="text-muted small">${log.targetType ? `(${e(log.targetType)})` : ''}</span>
-                </td>
-                <td class="small">${details}</td>
-              </tr>`;
-          }).join('')}
-        </tbody>
-      </table>
-      <div class="p-3 text-muted small">Hiển thị ${e(String(logs.length))} bản ghi gần nhất</div>`;
-
-    container.innerHTML = html;
-  }
-
-  /* ─── Parse details JSON ─── */
-  function buildDetails(log) {
-    let d = log.details;
-    if (!d) return '—';
-    if (typeof d === 'string') {
-      try { d = JSON.parse(d); } catch (_) { return Security.e(d).substring(0, 80); }
-    }
-    if (log.action === 'STATUS_CHANGE')  return `${Security.e(d.from || '')} → ${Security.e(d.to || '')}`;
-    if (log.action === 'CREATE_DOSSIER') return `${Security.e(d.projectName || '')} · ${Security.e(Utils.fmt.currency(d.amount))}`;
-    if (log.action === 'USER_CREATED')   return `${Security.e(d.username || '')} (${Security.e(d.role || '')})`;
-    if (log.action === 'USER_LOGIN')     return `username: ${Security.e(d.username || '')}`;
-    return Security.e(JSON.stringify(d).substring(0, 80));
-  }
-
-  /* ─── Filter (async) ─── */
-  async function applyFilter() {
-    _filterAction = document.getElementById('auditFilterAction')?.value || '';
-    _filterUser   = document.getElementById('auditFilterUser')?.value   || '';
-    _search       = document.getElementById('auditSearch')?.value       || '';
-    _limit        = parseInt(document.getElementById('auditLimit')?.value || '50');
-    await loadLogs();
-  }
-
-  function onSearchInput() {
-    clearTimeout(window._auditSearchTimer);
-    window._auditSearchTimer = setTimeout(applyFilter, 350);
-  }
-
-  /* ─── Export CSV (async) ─── */
-  async function exportLog() {
-    const logs = await DB.auditLogs.getAll(1000);
-    const rows = logs.map(l => {
-      const actor  = _allUsers.find(u => u.id === l.userId);
-      const action = ACTION_LABELS[l.action] || { label: l.action };
-      let details  = l.details || {};
-      if (typeof details === 'string') { try { details = JSON.parse(details); } catch(_){} }
-      return {
-        'Thời gian':        Utils.fmt.datetime(l.ts || l.timestamp || l.created_at || ''),
-        'Người thực hiện':  actor?.displayName || l.userId || 'Hệ thống',
-        'Hành động':        action.label,
-        'Đối tượng':        l.target  || '',
-        'Loại':             l.targetType || '',
-        'Chi tiết':         JSON.stringify(details)
-      };
-    });
-    Utils.exportCSV(rows, `audit-log-${new Date().toISOString().split('T')[0]}.csv`);
-  }
-
-  return { render, applyFilter, onSearchInput, exportLog };
-})();
-
-window.PageAudit = PageAudit;
+};
