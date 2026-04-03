@@ -1,13 +1,31 @@
 /**
- * settings.js - Cài đặt hệ thống
+ * settings.js - Cài đặt hệ thống (async/await, Table API)
+ * PayTrack Pro v3.0
  */
 
 const PageSettings = (() => {
   'use strict';
   const e = Security.e;
 
-  function render() {
+  /* ─── Render chính (async) ─── */
+  async function render() {
+    document.getElementById('mainContent').innerHTML =
+      `<div class="page-loader"><i class="fas fa-spinner fa-spin"></i> Đang tải...</div>`;
+
     const user = Auth.getCurrentUser();
+
+    // Stats (admin only)
+    let dossierCount = '—', userCount = '—', auditCount = '—';
+    if (Auth.isAdmin()) {
+      const [dos, usrs, auds] = await Promise.all([
+        DB.dossiers.getAll(),
+        DB.users.getAll(),
+        DB.auditLogs.getAll(9999)
+      ]);
+      dossierCount = String(dos.length);
+      userCount    = String(usrs.length);
+      auditCount   = String(auds.length);
+    }
 
     const html = `
 <div class="settings-page">
@@ -39,16 +57,19 @@ const PageSettings = (() => {
       <div class="form-grid" style="max-width:500px">
         <div class="form-group full-width">
           <label>Mật khẩu hiện tại</label>
-          <input type="password" id="oldPassword" class="form-input" placeholder="Nhập mật khẩu hiện tại" autocomplete="current-password">
+          <input type="password" id="oldPassword" class="form-input"
+            placeholder="Nhập mật khẩu hiện tại" autocomplete="current-password">
         </div>
         <div class="form-group">
           <label>Mật khẩu mới</label>
-          <input type="password" id="newPassword" class="form-input" placeholder="Tối thiểu 6 ký tự" autocomplete="new-password">
+          <input type="password" id="newPassword" class="form-input"
+            placeholder="Tối thiểu 6 ký tự" autocomplete="new-password">
           <div id="pwdStrength" class="pwd-strength mt-1"></div>
         </div>
         <div class="form-group">
           <label>Xác nhận mật khẩu mới</label>
-          <input type="password" id="confirmPassword" class="form-input" placeholder="Nhập lại mật khẩu mới" autocomplete="new-password">
+          <input type="password" id="confirmPassword" class="form-input"
+            placeholder="Nhập lại mật khẩu mới" autocomplete="new-password">
         </div>
         <div class="form-group full-width">
           <button id="changePwdBtn" class="btn btn-primary" onclick="PageSettings.changePassword()">
@@ -60,35 +81,18 @@ const PageSettings = (() => {
   </div>
 
   ${Auth.isAdmin() ? `
-  <!-- System Management (Admin only) -->
-  <div class="card mb-4">
-    <div class="card-header"><h3><i class="fas fa-database me-2"></i>Quản lý Dữ liệu (Admin)</h3></div>
-    <div class="card-body">
-      <div class="d-flex gap-2 flex-wrap">
-        <button class="btn btn-outline" onclick="PageSettings.exportData()">
-          <i class="fas fa-download me-1"></i>Xuất toàn bộ dữ liệu (JSON)
-        </button>
-        <button class="btn btn-warning" onclick="PageSettings.resetData()">
-          <i class="fas fa-undo me-1"></i>Reset về dữ liệu mẫu
-        </button>
-      </div>
-      <p class="text-muted small mt-2">
-        ⚠️ Reset sẽ xóa toàn bộ dữ liệu và khôi phục dữ liệu mẫu ban đầu.
-      </p>
-    </div>
-  </div>
-
+  <!-- System Info (Admin only) -->
   <div class="card mb-4">
     <div class="card-header"><h3><i class="fas fa-info-circle me-2"></i>Thông tin hệ thống</h3></div>
     <div class="card-body">
       <table class="table table-sm">
         <tbody>
-          <tr><td>Phiên bản</td><td>PayTrack Pro v2.0</td></tr>
-          <tr><td>Security Module</td><td>v${e(Security.VERSION)}</td></tr>
-          <tr><td>Tổng hồ sơ</td><td>${e(String(DB.dossiers.getAll().length))}</td></tr>
-          <tr><td>Tổng người dùng</td><td>${e(String(DB.users.getAll().length))}</td></tr>
-          <tr><td>Audit logs</td><td>${e(String(DB.auditLogs.getAll(9999).length))}</td></tr>
-          <tr><td>Lưu trữ</td><td>localStorage (browser)</td></tr>
+          <tr><td>Phiên bản</td><td>PayTrack Pro v3.0</td></tr>
+          <tr><td>Security Module</td><td>v${e(Security.VERSION || '2.0.0')}</td></tr>
+          <tr><td>Lưu trữ</td><td>RESTful Table API (server-side, persistent)</td></tr>
+          <tr><td>Tổng hồ sơ</td><td>${e(dossierCount)}</td></tr>
+          <tr><td>Tổng người dùng</td><td>${e(userCount)}</td></tr>
+          <tr><td>Audit logs</td><td>${e(auditCount)}</td></tr>
           <tr><td>Bảo mật</td><td>SHA-256, Rate Limiting, Session Timeout, XSS Protection, CSP</td></tr>
         </tbody>
       </table>
@@ -106,7 +110,8 @@ const PageSettings = (() => {
           <tr><td>CSRF Token</td><td><code class="mono">${e(Security.CSRF.get().substring(0, 16))}...</code></td></tr>
         </tbody>
       </table>
-      <button class="btn btn-danger mt-2" onclick="if(confirm('Đăng xuất?')){Auth.logout();App.showLogin();}">
+      <button class="btn btn-danger mt-2"
+        onclick="if(confirm('Đăng xuất?')){Auth.logout();App.showLogin();}">
         <i class="fas fa-sign-out-alt me-1"></i>Đăng xuất ngay
       </button>
     </div>
@@ -133,6 +138,7 @@ const PageSettings = (() => {
     }
   }
 
+  /* ─── Đổi mật khẩu (async) ─── */
   async function changePassword() {
     const oldPwd  = document.getElementById('oldPassword')?.value;
     const newPwd  = document.getElementById('newPassword')?.value;
@@ -154,39 +160,15 @@ const PageSettings = (() => {
 
     if (result.ok) {
       Utils.showToast('Đã cập nhật mật khẩu thành công!', 'success');
-      document.getElementById('oldPassword').value    = '';
-      document.getElementById('newPassword').value    = '';
+      document.getElementById('oldPassword').value     = '';
+      document.getElementById('newPassword').value     = '';
       document.getElementById('confirmPassword').value = '';
     } else {
-      Utils.showToast(result.reason, 'error');
+      Utils.showToast(result.reason || 'Lỗi đổi mật khẩu', 'error');
     }
   }
 
-  function exportData() {
-    const data = DB.export();
-    const json = JSON.stringify(data, null, 2);
-    const blob = new Blob([json], { type: 'application/json' });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    a.href     = url;
-    a.download = `paytrack-backup-${new Date().toISOString().split('T')[0]}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    Utils.showToast('Đã xuất dữ liệu thành công', 'success');
-  }
-
-  function resetData() {
-    Utils.Modal.confirm(
-      '⚠️ CẢNH BÁO: Toàn bộ dữ liệu sẽ bị xóa và thay bằng dữ liệu mẫu. Tiếp tục?',
-      () => {
-        DB.reset();
-        Utils.showToast('Đã reset dữ liệu về mẫu ban đầu', 'success');
-        App.navigate('dashboard');
-      }
-    );
-  }
-
-  return { render, changePassword, exportData, resetData };
+  return { render, changePassword };
 })();
 
 window.PageSettings = PageSettings;

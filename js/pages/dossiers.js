@@ -1,5 +1,6 @@
 /**
- * dossiers.js - Quản lý hồ sơ (list, create, detail, edit)
+ * dossiers.js - Quản lý hồ sơ (async/await, Table API)
+ * PayTrack Pro v3.0
  */
 
 const PageDossiers = (() => {
@@ -10,11 +11,12 @@ const PageDossiers = (() => {
   let _page    = 1;
   const LIMIT  = 10;
   let _sort    = 'createdAt_desc';
+  let _allUsers = [];
 
-  /* ─── List view ─── */
-  function render(params = {}) {
+  /* ─── List view (async) ─── */
+  async function render(params = {}) {
     if (params.filters) _filters = { ..._filters, ...params.filters };
-    _page = params.page || 1;
+    _page = params.page || _page;
 
     const html = `
 <div class="dossiers-page">
@@ -38,16 +40,18 @@ const PageDossiers = (() => {
         <label>Trạng thái</label>
         <select id="filterStatus" onchange="PageDossiers.applyFilter()">
           <option value="">Tất cả</option>
-          ${DB.WORKFLOW_STEPS.map(s => `<option value="${e(s.id)}" ${_filters.status === s.id ? 'selected' : ''}>${e(s.label)}</option>`).join('')}
+          ${DB.WORKFLOW_STEPS.map(s =>
+            `<option value="${e(s.id)}" ${_filters.status === s.id ? 'selected' : ''}>${e(s.label)}</option>`
+          ).join('')}
         </select>
       </div>
       <div class="filter-group">
         <label>Phòng ban</label>
         <select id="filterDept" onchange="PageDossiers.applyFilter()">
           <option value="">Tất cả</option>
-          <option value="telecom"   ${_filters.department === 'telecom'   ? 'selected' : ''}>Viễn thông</option>
-          <option value="business"  ${_filters.department === 'business'  ? 'selected' : ''}>Kinh doanh</option>
-          <option value="accounting"${_filters.department === 'accounting'? 'selected' : ''}>Kế toán</option>
+          <option value="telecom"    ${_filters.department === 'telecom'    ? 'selected' : ''}>Viễn thông</option>
+          <option value="business"   ${_filters.department === 'business'   ? 'selected' : ''}>Kinh doanh</option>
+          <option value="accounting" ${_filters.department === 'accounting' ? 'selected' : ''}>Kế toán</option>
         </select>
       </div>
       <div class="filter-group">
@@ -70,7 +74,8 @@ const PageDossiers = (() => {
       </div>
       <div class="filter-group flex-1">
         <label>Tìm kiếm</label>
-        <input type="text" id="filterSearch" placeholder="Mã HS, tên dự án..." value="${e(_filters.search)}" oninput="PageDossiers.onSearchInput()">
+        <input type="text" id="filterSearch" placeholder="Mã HS, tên dự án..."
+          value="${e(_filters.search)}" oninput="PageDossiers.onSearchInput()">
       </div>
       <button class="btn btn-sm btn-secondary" onclick="PageDossiers.clearFilters()">
         <i class="fas fa-times me-1"></i>Xóa lọc
@@ -84,9 +89,10 @@ const PageDossiers = (() => {
     ${[
       ['createdAt_desc', 'Mới nhất'], ['createdAt_asc', 'Cũ nhất'],
       ['amount_desc', 'Giá trị ↓'],  ['deadline_asc', 'Deadline']
-    ].map(([val, lbl]) => `
-      <button class="sort-btn ${_sort === val ? 'active' : ''}" onclick="PageDossiers.setSort('${e(val)}')">${e(lbl)}</button>
-    `).join('')}
+    ].map(([val, lbl]) =>
+      `<button class="sort-btn ${_sort === val ? 'active' : ''}"
+        onclick="PageDossiers.setSort('${e(val)}')">${e(lbl)}</button>`
+    ).join('')}
   </div>
 
   <!-- Table -->
@@ -97,13 +103,9 @@ const PageDossiers = (() => {
   </div>
 </div>
 
-<!-- Detail Modal -->
 ${buildDetailModal()}
-<!-- Form Modal -->
 ${buildFormModal()}
-<!-- Transition Modal -->
 ${buildTransitionModal()}
-<!-- Confirm Modal -->
 <div id="confirmModal" class="modal">
   <div class="modal-dialog modal-sm">
     <div class="modal-header"><h3>Xác nhận</h3></div>
@@ -116,16 +118,24 @@ ${buildTransitionModal()}
 </div>`;
 
     document.getElementById('mainContent').innerHTML = html;
-    loadTable();
+
+    // Tải users một lần để dùng trong form
+    _allUsers = await DB.users.getAll();
+
+    await loadTable();
   }
 
-  function loadTable() {
-    const result = API.dossiers.list(_filters, _sort, _page, LIMIT);
+  /* ─── Load table data (async) ─── */
+  async function loadTable() {
     const container = document.getElementById('dossierTableContainer');
     if (!container) return;
 
+    container.innerHTML = `<div class="loading-state"><i class="fas fa-spinner fa-spin"></i> Đang tải...</div>`;
+
+    const result = await API.dossiers.list(_filters, _sort, _page, LIMIT);
+
     if (!result.success) {
-      container.innerHTML = `<div class="error-state"><p>${e(result.error)}</p></div>`;
+      container.innerHTML = `<div class="error-state"><p>${e(result.error || 'Lỗi tải dữ liệu')}</p></div>`;
       return;
     }
 
@@ -137,7 +147,9 @@ ${buildTransitionModal()}
     }
 
     const tableHTML = `
-      <div class="table-meta p-3 text-muted small">Hiển thị ${e(String(Math.min(data.length, LIMIT)))} / ${e(String(total))} hồ sơ</div>
+      <div class="table-meta p-3 text-muted small">
+        Hiển thị ${e(String(data.length))} / ${e(String(total))} hồ sơ
+      </div>
       <table class="table">
         <thead>
           <tr>
@@ -159,6 +171,10 @@ ${buildTransitionModal()}
       ${Utils.buildPagination(total, page, LIMIT, (p) => { _page = p; loadTable(); })}`;
 
     container.innerHTML = tableHTML;
+
+    // Update badge
+    const badge = document.getElementById('dossierCount');
+    if (badge) badge.textContent = total;
   }
 
   function renderRow(d) {
@@ -167,37 +183,40 @@ ${buildTransitionModal()}
     const dl  = Utils.deadlineStatus(d.deadline);
     const canEdit = Auth.canEditDossier(d) || Auth.isAdmin();
     const deptMap = { telecom: 'Viễn thông', business: 'Kinh doanh', accounting: 'Kế toán' };
+    const did = e(d.dossierId || d.id || '');
 
     return `
-      <tr class="table-row ${dl.status === 'overdue' ? 'row-overdue' : ''}" onclick="PageDossiers.openDetail('${e(d.id)}')">
-        <td><span class="mono">${e(d.id)}</span></td>
+      <tr class="table-row ${dl.status === 'overdue' ? 'row-overdue' : ''}"
+        onclick="PageDossiers.openDetail('${did}')">
+        <td><span class="mono">${e(d.dossierId || d.id || '')}</span></td>
         <td>
-          <div class="project-name">${e(d.projectName)}</div>
+          <div class="project-name">${e(d.projectName || '')}</div>
           ${d.contractNo ? `<div class="contract-no text-muted small">${e(d.contractNo)}</div>` : ''}
         </td>
-        <td>${e(deptMap[d.department] || d.department)}</td>
+        <td>${e(deptMap[d.department] || d.department || '')}</td>
         <td><span class="badge ${e(sb.class)}">${e(sb.label)}</span></td>
         <td><span class="badge ${e(pb.class)}">${e(pb.label)}</span></td>
         <td class="text-right">${e(Utils.fmt.currency(d.amount))}</td>
         <td><span class="${e(dl.class)}">${e(dl.label)}</span></td>
         <td>
-          ${d.assigneeId ? `
-          <div class="assignee-cell">
-            <div class="avatar-sm" style="background:${e(d.assigneeColor || '#6c757d')}">${e(d.assigneeAvatar || '?')}</div>
-            <span>${e(d.assigneeName || 'N/A')}</span>
-          </div>` : '<span class="text-muted">Chưa giao</span>'}
+          ${d.assigneeId
+            ? `<div class="assignee-cell">
+                <div class="avatar-sm" style="background:${e(d.assigneeColor || '#6c757d')}">${e(d.assigneeAvatar || '?')}</div>
+                <span>${e(d.assigneeName || 'N/A')}</span>
+               </div>`
+            : '<span class="text-muted">Chưa giao</span>'}
         </td>
         <td onclick="event.stopPropagation()">
           <div class="action-btns">
-            <button class="btn btn-xs btn-info" onclick="PageDossiers.openDetail('${e(d.id)}')" title="Xem chi tiết">
+            <button class="btn btn-xs btn-info" onclick="PageDossiers.openDetail('${did}')" title="Xem chi tiết">
               <i class="fas fa-eye"></i>
             </button>
             ${canEdit ? `
-            <button class="btn btn-xs btn-warning" onclick="PageDossiers.openEdit('${e(d.id)}')" title="Chỉnh sửa">
+            <button class="btn btn-xs btn-warning" onclick="PageDossiers.openEdit('${did}')" title="Chỉnh sửa">
               <i class="fas fa-edit"></i>
             </button>` : ''}
             ${Auth.isAdmin() ? `
-            <button class="btn btn-xs btn-danger" onclick="PageDossiers.deleteDossier('${e(d.id)}')" title="Xóa">
+            <button class="btn btn-xs btn-danger" onclick="PageDossiers.deleteDossier('${did}')" title="Xóa">
               <i class="fas fa-trash"></i>
             </button>` : ''}
           </div>
@@ -205,82 +224,94 @@ ${buildTransitionModal()}
       </tr>`;
   }
 
-  /* ─── Detail Modal ─── */
-  function openDetail(id) {
-    const result = API.dossiers.getById(id);
-    if (!result.success) { Utils.showToast(result.error, 'error'); return; }
+  /* ─── Detail Modal (async) ─── */
+  async function openDetail(id) {
+    const modal = document.getElementById('detailModal');
+    const body  = document.getElementById('detailModalBody');
+    if (!modal || !body) return;
+
+    body.innerHTML = `<div class="loading-state"><i class="fas fa-spinner fa-spin"></i> Đang tải chi tiết...</div>`;
+    Utils.Modal.show('detailModal');
+
+    const result = await API.dossiers.getById(id);
+    if (!result.success) {
+      body.innerHTML = `<div class="error-state"><p>${e(result.error || 'Không tìm thấy hồ sơ')}</p></div>`;
+      return;
+    }
     const d = result.data;
 
     const sb  = Utils.statusBadge(d.status);
     const pb  = Utils.priorityBadge(d.priority);
     const dl  = Utils.deadlineStatus(d.deadline);
-    const user = Auth.getCurrentUser();
     const deptMap = { telecom: 'Phòng Viễn thông', business: 'Phòng Kinh doanh', accounting: 'Phòng Kế toán' };
 
     // Workflow progress
-    const steps   = DB.WORKFLOW_STEPS;
-    const curIdx  = steps.findIndex(s => s.id === d.status);
-    const wfHTML  = steps.map((step, i) => `
+    const steps  = DB.WORKFLOW_STEPS;
+    const curIdx = steps.findIndex(s => s.id === d.status);
+    const wfHTML = steps.map((step, i) => `
       <div class="wf-step ${i < curIdx ? 'done' : i === curIdx ? 'current' : 'pending'}">
         <div class="wf-dot"><i class="fas ${e(step.icon)}"></i></div>
         <div class="wf-step-label">${e(step.label)}</div>
       </div>`).join('<div class="wf-line"></div>');
 
     // Available transitions
-    const nextSteps = DB.workflow.getNextSteps(d.status);
+    const nextSteps   = DB.workflow.getNextSteps(d.status);
     const canTransBtn = nextSteps.filter(s => Auth.canTransitionDossier(d, s));
 
-    // History
-    const histHTML = d.history.slice().reverse().map(h => {
-      const actor = DB.users.getById(h.actorId);
+    // History — timestamp field is 'ts'
+    const allUsers = _allUsers.length ? _allUsers : await DB.users.getAll();
+    const histHTML = (d.history || []).slice().reverse().map(h => {
+      const actor = allUsers.find(u => u.id === h.actorId);
       const step  = steps.find(s => s.id === h.status);
+      const ts    = h.ts || h.timestamp || h.created_at || '';
       return `
         <div class="timeline-item">
           <div class="timeline-dot" style="background:${e(step?.color || '#6c757d')}"></div>
           <div class="timeline-content">
-            <div class="timeline-action">${e(step?.label || h.status)}</div>
+            <div class="timeline-action">${e(step?.label || h.status || '')}</div>
             <div class="timeline-meta">
               ${actor ? `<span>${e(actor.displayName)}</span> · ` : ''}
-              <span>${e(Utils.fmt.datetime(h.timestamp))}</span>
+              <span>${e(Utils.fmt.datetime(ts))}</span>
             </div>
             ${h.note ? `<div class="timeline-note">${e(h.note)}</div>` : ''}
           </div>
         </div>`;
     }).join('');
 
-    // Comments
-    const commentsHTML = d.comments.map(c => `
-      <div class="comment-item">
-        <div class="comment-avatar" style="background:${e(c.actor?.color || '#6c757d')}">${e(c.actor?.avatar || '?')}</div>
-        <div class="comment-body">
-          <div class="comment-meta">
-            <strong>${e(c.actor?.displayName || 'N/A')}</strong>
-            <span class="text-muted small">${e(Utils.fmt.timeAgo(c.createdAt))}</span>
+    // Comments — timestamp field is 'ts'
+    const commentsHTML = (d.comments || []).map(c => {
+      const ts = c.ts || c.created_at || '';
+      return `
+        <div class="comment-item">
+          <div class="comment-avatar" style="background:${e(c.actor?.color || '#6c757d')}">${e(c.actor?.avatar || '?')}</div>
+          <div class="comment-body">
+            <div class="comment-meta">
+              <strong>${e(c.actor?.displayName || 'N/A')}</strong>
+              <span class="text-muted small">${e(Utils.fmt.timeAgo(ts))}</span>
+            </div>
+            <div class="comment-text">${e(c.text || '')}</div>
           </div>
-          <div class="comment-text">${e(c.text)}</div>
-        </div>
-      </div>`).join('') || '<p class="text-muted">Chưa có bình luận</p>';
+        </div>`;
+    }).join('') || '<p class="text-muted">Chưa có bình luận</p>';
 
-    const modal = document.getElementById('detailModal');
-    const body  = document.getElementById('detailModalBody');
-    if (!modal || !body) return;
+    const dossierId = e(d.dossierId || d.id || '');
 
     body.innerHTML = `
-      <!-- QR + ID -->
+      <!-- ID + Header -->
       <div class="detail-header">
         <div>
-          <h2 class="detail-id">${e(d.id)}</h2>
-          <h3 class="detail-name">${e(d.projectName)}</h3>
+          <h2 class="detail-id">${e(d.dossierId || d.id || '')}</h2>
+          <h3 class="detail-name">${e(d.projectName || '')}</h3>
           ${d.contractNo ? `<p class="text-muted">${e(d.contractNo)}</p>` : ''}
         </div>
-        <div id="qrCode_${e(d.id)}" class="qr-container"></div>
+        <div id="qrCode_${dossierId}" class="qr-container"></div>
       </div>
 
       <!-- Badges -->
       <div class="detail-badges mb-3">
         <span class="badge ${e(sb.class)} badge-lg">${e(sb.label)}</span>
         <span class="badge ${e(pb.class)} badge-lg">${e(pb.label)}</span>
-        <span class="badge badge-dept">${e(deptMap[d.department] || d.department)}</span>
+        <span class="badge badge-dept">${e(deptMap[d.department] || d.department || '')}</span>
         <span class="${e(dl.class)}">${e(dl.label)}</span>
       </div>
 
@@ -293,8 +324,9 @@ ${buildTransitionModal()}
         <span class="text-muted me-2 small">Chuyển sang:</span>
         ${canTransBtn.map(s => {
           const step = steps.find(x => x.id === s);
-          return `<button class="btn btn-sm btn-outline" style="border-color:${e(step?.color)};color:${e(step?.color)}"
-            onclick="PageDossiers.openTransition('${e(d.id)}','${e(s)}','${e(step?.label || s)}')">
+          return `<button class="btn btn-sm btn-outline"
+            style="border-color:${e(step?.color || '#6c757d')};color:${e(step?.color || '#6c757d')}"
+            onclick="PageDossiers.openTransition('${dossierId}','${e(s)}','${e(step?.label || s)}')">
             <i class="fas ${e(step?.icon || 'fa-arrow-right')} me-1"></i>${e(step?.label || s)}
           </button>`;
         }).join('')}
@@ -302,43 +334,28 @@ ${buildTransitionModal()}
 
       <!-- Detail grid -->
       <div class="detail-grid">
-        <div class="detail-item">
-          <label>Người tạo</label>
-          <value>${e(d.creatorName)}</value>
-        </div>
-        <div class="detail-item">
-          <label>Người xử lý</label>
-          <value>${e(d.assigneeName)}</value>
-        </div>
-        <div class="detail-item">
-          <label>Giá trị hợp đồng</label>
-          <value class="amount">${e(Utils.fmt.currency(d.amount))}</value>
-        </div>
+        <div class="detail-item"><label>Người tạo</label><value>${e(d.creatorName || 'N/A')}</value></div>
+        <div class="detail-item"><label>Người xử lý</label><value>${e(d.assigneeName || 'Chưa giao')}</value></div>
+        <div class="detail-item"><label>Giá trị hợp đồng</label><value class="amount">${e(Utils.fmt.currency(d.amount))}</value></div>
         <div class="detail-item">
           <label>Deadline</label>
           <value>${e(Utils.fmt.date(d.deadline))} <span class="${e(dl.class)}">(${e(dl.label)})</span></value>
         </div>
-        <div class="detail-item">
-          <label>Ngày tạo</label>
-          <value>${e(Utils.fmt.datetime(d.createdAt))}</value>
-        </div>
-        <div class="detail-item">
-          <label>Cập nhật</label>
-          <value>${e(Utils.fmt.datetime(d.updatedAt))}</value>
-        </div>
+        <div class="detail-item"><label>Ngày tạo</label><value>${e(Utils.fmt.datetime(d.created_at || d.createdAt))}</value></div>
+        <div class="detail-item"><label>Cập nhật</label><value>${e(Utils.fmt.datetime(d.updated_at || d.updatedAt))}</value></div>
         ${d.description ? `<div class="detail-item full-width"><label>Mô tả</label><value>${e(d.description)}</value></div>` : ''}
         ${d.notes ? `<div class="detail-item full-width"><label>Ghi chú nội bộ</label><value>${e(d.notes)}</value></div>` : ''}
         ${d.tags?.length ? `<div class="detail-item full-width"><label>Nhãn</label><value>${d.tags.map(t => `<span class="tag">${e(t)}</span>`).join('')}</value></div>` : ''}
       </div>
 
-      <!-- Tabs: History | Comments -->
+      <!-- Tabs -->
       <div class="detail-tabs mt-4">
         <div class="tab-header">
           <button class="tab-btn active" data-tab="history">
-            <i class="fas fa-history me-1"></i>Lịch sử (${e(String(d.history.length))})
+            <i class="fas fa-history me-1"></i>Lịch sử (${e(String((d.history || []).length))})
           </button>
           <button class="tab-btn" data-tab="comments">
-            <i class="fas fa-comments me-1"></i>Bình luận (${e(String(d.comments.length))})
+            <i class="fas fa-comments me-1"></i>Bình luận (${e(String((d.comments || []).length))})
           </button>
         </div>
         <div class="tab-body">
@@ -349,7 +366,7 @@ ${buildTransitionModal()}
             <div class="comments-list">${commentsHTML}</div>
             <div class="comment-form mt-3">
               <textarea id="newComment" placeholder="Nhập bình luận..." rows="3" class="form-input w-full"></textarea>
-              <button class="btn btn-primary mt-2" onclick="PageDossiers.addComment('${e(d.id)}')">
+              <button class="btn btn-primary mt-2" onclick="PageDossiers.addComment('${dossierId}')">
                 <i class="fas fa-paper-plane me-1"></i>Gửi
               </button>
             </div>
@@ -357,10 +374,8 @@ ${buildTransitionModal()}
         </div>
       </div>`;
 
-    Utils.Modal.show('detailModal');
-
     // Generate QR
-    setTimeout(() => Utils.generateQR(`qrCode_${d.id}`, `PAYTRACK:${d.id}:${d.projectName}`, 100), 100);
+    setTimeout(() => Utils.generateQR(`qrCode_${d.dossierId || d.id}`, `PAYTRACK:${d.dossierId || d.id}:${d.projectName}`, 100), 100);
 
     // Tab switching
     body.querySelectorAll('.tab-btn').forEach(btn => {
@@ -368,102 +383,108 @@ ${buildTransitionModal()}
         body.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
         body.querySelectorAll('.tab-panel').forEach(p => p.classList.add('hidden'));
         btn.classList.add('active');
-        document.getElementById(`tab${btn.dataset.tab.charAt(0).toUpperCase() + btn.dataset.tab.slice(1)}`)?.classList.remove('hidden');
+        const panelId = `tab${btn.dataset.tab.charAt(0).toUpperCase() + btn.dataset.tab.slice(1)}`;
+        document.getElementById(panelId)?.classList.remove('hidden');
       });
     });
   }
 
-  function addComment(dossierId) {
+  /* ─── Add Comment (async) ─── */
+  async function addComment(dossierId) {
     const textarea = document.getElementById('newComment');
-    const text = textarea?.value?.trim();
+    const text     = textarea?.value?.trim();
     if (!text) { Utils.showToast('Vui lòng nhập nội dung bình luận', 'warning'); return; }
 
-    const result = API.comments.add(dossierId, text);
+    const result = await API.comments.add(dossierId, text);
     if (result.success) {
       Utils.showToast('Đã thêm bình luận', 'success');
-      openDetail(dossierId); // refresh
+      await openDetail(dossierId); // refresh
     } else {
-      Utils.showToast(result.error, 'error');
+      Utils.showToast(result.error || 'Lỗi gửi bình luận', 'error');
     }
   }
 
-  /* ─── Transition Modal ─── */
+  /* ─── Transition (async) ─── */
   function openTransition(dossierId, newStatus, statusLabel) {
     const modal = document.getElementById('transitionModal');
     if (!modal) return;
-
-    document.getElementById('transitionDossierId').value  = dossierId;
-    document.getElementById('transitionNewStatus').value  = newStatus;
+    document.getElementById('transitionDossierId').value      = dossierId;
+    document.getElementById('transitionNewStatus').value      = newStatus;
     document.getElementById('transitionStatusLabel').textContent = statusLabel;
-    document.getElementById('transitionNote').value = '';
-
+    document.getElementById('transitionNote').value           = '';
     Utils.Modal.show('transitionModal');
   }
 
-  function submitTransition() {
-    const dossierId  = document.getElementById('transitionDossierId')?.value;
-    const newStatus  = document.getElementById('transitionNewStatus')?.value;
-    const note       = document.getElementById('transitionNote')?.value;
-    const btn        = document.getElementById('transitionSubmitBtn');
-
+  async function submitTransition() {
+    const dossierId = document.getElementById('transitionDossierId')?.value;
+    const newStatus = document.getElementById('transitionNewStatus')?.value;
+    const note      = document.getElementById('transitionNote')?.value;
+    const btn       = document.getElementById('transitionSubmitBtn');
     if (!dossierId || !newStatus) return;
 
     Utils.dom.setLoading(btn, true, 'Đang xử lý...');
-    const result = API.dossiers.transition(dossierId, newStatus, note);
+    const result = await API.dossiers.transition(dossierId, newStatus, note);
     Utils.dom.setLoading(btn, false);
 
     if (result.success) {
       Utils.showToast('Đã chuyển trạng thái thành công!', 'success');
       Utils.Modal.hide('transitionModal');
       Utils.Modal.hide('detailModal');
-      loadTable();
+      await loadTable();
       App.loadNotificationBadge();
     } else {
-      Utils.showToast(result.error, 'error');
+      Utils.showToast(result.error || 'Lỗi chuyển trạng thái', 'error');
     }
   }
 
-  /* ─── Create / Edit Form ─── */
-  function renderNew() {
+  /* ─── Create/Edit Form (async) ─── */
+  async function renderNew() {
     if (!Auth.hasPermission('dossier.create') && !Auth.isAdmin()) {
       Utils.showToast('Bạn không có quyền tạo hồ sơ', 'error');
       App.navigate('dossiers');
       return;
     }
-    render();
+    await render();
     setTimeout(() => openForm(null), 150);
   }
 
-  function openForm(id) {
-    const dossier = id ? DB.dossiers.getById(id) : null;
-    const users   = DB.users.getAll();
-    const modal   = document.getElementById('dossierFormModal');
+  async function openForm(id) {
+    let dossier = null;
+    if (id) {
+      const res = await DB.dossiers.getById(id);
+      dossier = res || null;
+    }
+
+    const users = _allUsers.length ? _allUsers : await DB.users.getAll();
+    const modal = document.getElementById('dossierFormModal');
     if (!modal) return;
 
     const title = document.getElementById('formModalTitle');
-    if (title) title.textContent = dossier ? `Chỉnh sửa: ${dossier.id}` : 'Tạo Hồ sơ mới';
+    if (title) title.textContent = dossier ? `Chỉnh sửa: ${dossier.dossierId || dossier.id}` : 'Tạo Hồ sơ mới';
 
     const form = document.getElementById('dossierForm');
     if (!form) return;
 
     form.innerHTML = `
-      <input type="hidden" id="formDossierId" value="${e(dossier?.id || '')}">
+      <input type="hidden" id="formDossierId" value="${e(dossier?.dossierId || dossier?.id || '')}">
       <div class="form-grid">
         <div class="form-group full-width">
           <label class="required">Tên dự án / Hợp đồng</label>
-          <input type="text" id="fProjectName" class="form-input" value="${e(dossier?.projectName || '')}" maxlength="200" required placeholder="Nhập tên dự án...">
+          <input type="text" id="fProjectName" class="form-input"
+            value="${e(dossier?.projectName || '')}" maxlength="200" required placeholder="Nhập tên dự án...">
         </div>
         <div class="form-group">
           <label>Số hợp đồng</label>
-          <input type="text" id="fContractNo" class="form-input" value="${e(dossier?.contractNo || '')}" maxlength="50" placeholder="HĐ-2024-XXX">
+          <input type="text" id="fContractNo" class="form-input"
+            value="${e(dossier?.contractNo || '')}" maxlength="50" placeholder="HĐ-2024-XXX">
         </div>
         <div class="form-group">
           <label class="required">Phòng ban</label>
           <select id="fDepartment" class="form-input">
             ${Utils.dom.buildOptions([
-              {value:'telecom',label:'Phòng Viễn thông'},
-              {value:'business',label:'Phòng Kinh doanh'},
-              {value:'accounting',label:'Phòng Kế toán'}
+              {value:'telecom',    label:'Phòng Viễn thông'},
+              {value:'business',   label:'Phòng Kinh doanh'},
+              {value:'accounting', label:'Phòng Kế toán'}
             ], dossier?.department, '-- Chọn phòng ban --')}
           </select>
         </div>
@@ -480,7 +501,8 @@ ${buildTransitionModal()}
         </div>
         <div class="form-group">
           <label class="required">Giá trị (VNĐ)</label>
-          <input type="number" id="fAmount" class="form-input" value="${e(String(dossier?.amount || ''))}" min="0" max="1000000000000" placeholder="0">
+          <input type="number" id="fAmount" class="form-input"
+            value="${e(String(dossier?.amount || ''))}" min="0" max="1000000000000" placeholder="0">
         </div>
         <div class="form-group">
           <label>Deadline</label>
@@ -490,101 +512,107 @@ ${buildTransitionModal()}
           <label>Người xử lý</label>
           <select id="fAssignee" class="form-input">
             ${Utils.dom.buildOptions(
-              users.filter(u => u.active).map(u => ({ value: u.id, label: `${u.displayName} (${Auth.getRoleLabel(u.role)})` })),
+              users.filter(u => u.active !== false).map(u => ({
+                value: u.id,
+                label: `${u.displayName} (${Auth.getRoleLabel(u.role)})`
+              })),
               dossier?.assigneeId, '-- Chưa giao --'
             )}
           </select>
         </div>
         <div class="form-group full-width">
           <label>Mô tả</label>
-          <textarea id="fDescription" class="form-input" rows="3" maxlength="2000" placeholder="Mô tả chi tiết...">${e(dossier?.description || '')}</textarea>
+          <textarea id="fDescription" class="form-input" rows="3" maxlength="2000"
+            placeholder="Mô tả chi tiết...">${e(dossier?.description || '')}</textarea>
         </div>
         <div class="form-group full-width">
           <label>Ghi chú nội bộ</label>
-          <textarea id="fNotes" class="form-input" rows="2" maxlength="1000" placeholder="Ghi chú...">${e(dossier?.notes || '')}</textarea>
+          <textarea id="fNotes" class="form-input" rows="2" maxlength="1000"
+            placeholder="Ghi chú...">${e(dossier?.notes || '')}</textarea>
         </div>
         <div class="form-group full-width">
           <label>Nhãn (tags, cách nhau bởi dấu phẩy)</label>
-          <input type="text" id="fTags" class="form-input" value="${e((dossier?.tags || []).join(', '))}" placeholder="mạng, VNPT, hạ tầng">
+          <input type="text" id="fTags" class="form-input"
+            value="${e((dossier?.tags || []).join(', '))}" placeholder="mạng, VNPT, hạ tầng">
         </div>
       </div>`;
 
     Utils.Modal.show('dossierFormModal');
   }
 
-  function openEdit(id) {
-    const dossier = DB.dossiers.getById(id);
+  async function openEdit(id) {
+    const dossier = await DB.dossiers.getById(id);
     if (!dossier) { Utils.showToast('Không tìm thấy hồ sơ', 'error'); return; }
     if (!Auth.canEditDossier(dossier) && !Auth.isAdmin()) {
       Utils.showToast('Bạn không có quyền chỉnh sửa hồ sơ này', 'error');
       return;
     }
-    openForm(id);
+    await openForm(id);
   }
 
-  function submitForm() {
-    const id = document.getElementById('formDossierId')?.value;
+  async function submitForm() {
+    const id  = document.getElementById('formDossierId')?.value;
+    const btn = document.getElementById('formSubmitBtn');
 
     const data = {
-      projectName:  document.getElementById('fProjectName')?.value || '',
-      contractNo:   document.getElementById('fContractNo')?.value  || '',
-      department:   document.getElementById('fDepartment')?.value  || '',
-      priority:     document.getElementById('fPriority')?.value    || 'medium',
+      projectName:  document.getElementById('fProjectName')?.value  || '',
+      contractNo:   document.getElementById('fContractNo')?.value   || '',
+      department:   document.getElementById('fDepartment')?.value   || '',
+      priority:     document.getElementById('fPriority')?.value     || 'medium',
       amount:       parseFloat(document.getElementById('fAmount')?.value || '0'),
-      deadline:     document.getElementById('fDeadline')?.value    || '',
-      assigneeId:   document.getElementById('fAssignee')?.value    || '',
-      description:  document.getElementById('fDescription')?.value || '',
-      notes:        document.getElementById('fNotes')?.value       || '',
+      deadline:     document.getElementById('fDeadline')?.value     || '',
+      assigneeId:   document.getElementById('fAssignee')?.value     || '',
+      description:  document.getElementById('fDescription')?.value  || '',
+      notes:        document.getElementById('fNotes')?.value        || '',
       tags:         (document.getElementById('fTags')?.value || '').split(',').map(t => t.trim()).filter(Boolean)
     };
 
-    const btn = document.getElementById('formSubmitBtn');
-    Utils.dom.setLoading(btn, true);
-
-    let result;
-    if (id) {
-      result = API.dossiers.update(id, data);
-    } else {
-      result = API.dossiers.create(data);
+    if (!data.projectName.trim()) {
+      Utils.showToast('Tên dự án là bắt buộc', 'warning'); return;
     }
 
+    Utils.dom.setLoading(btn, true);
+    const result = id
+      ? await API.dossiers.update(id, data)
+      : await API.dossiers.create(data);
     Utils.dom.setLoading(btn, false);
 
     if (result.success) {
       Utils.showToast(id ? 'Đã cập nhật hồ sơ!' : 'Đã tạo hồ sơ mới!', 'success');
       Utils.Modal.hide('dossierFormModal');
-      loadTable();
+      await loadTable();
       App.loadNotificationBadge();
     } else {
-      Utils.showToast(result.error, 'error');
+      Utils.showToast(result.error || 'Đã xảy ra lỗi', 'error');
     }
   }
 
   function deleteDossier(id) {
     Utils.Modal.confirm(
       `Bạn có chắc muốn xóa hồ sơ ${id}? Hành động này không thể hoàn tác.`,
-      () => {
-        const result = API.dossiers.delete(id);
+      async () => {
+        const result = await API.dossiers.delete(id);
         if (result.success) {
           Utils.showToast('Đã xóa hồ sơ', 'success');
-          loadTable();
+          Utils.Modal.hide('detailModal');
+          await loadTable();
         } else {
-          Utils.showToast(result.error, 'error');
+          Utils.showToast(result.error || 'Lỗi xóa hồ sơ', 'error');
         }
       }
     );
   }
 
   /* ─── Filter / Sort ─── */
-  function applyFilter() {
-    _filters.status     = document.getElementById('filterStatus')?.value  || '';
-    _filters.department = document.getElementById('filterDept')?.value    || '';
-    _filters.priority   = document.getElementById('filterPriority')?.value|| '';
+  async function applyFilter() {
+    _filters.status     = document.getElementById('filterStatus')?.value   || '';
+    _filters.department = document.getElementById('filterDept')?.value     || '';
+    _filters.priority   = document.getElementById('filterPriority')?.value || '';
     _filters.dateFrom   = document.getElementById('filterDateFrom')?.value || '';
     _filters.dateTo     = document.getElementById('filterDateTo')?.value   || '';
     _filters.search     = document.getElementById('filterSearch')?.value   || '';
     _page = 1;
-    loadTable();
+    await loadTable();
   }
 
   function onSearchInput() {
@@ -592,29 +620,34 @@ ${buildTransitionModal()}
     window._dossierSearchTimer = setTimeout(applyFilter, 350);
   }
 
-  function clearFilters() {
+  async function clearFilters() {
     _filters = { status: '', department: '', priority: '', search: '', dateFrom: '', dateTo: '' };
-    render();
+    _page = 1;
+    await render();
   }
 
-  function setSort(sort) {
+  async function setSort(sort) {
     _sort = sort;
     _page = 1;
-    render();
+    await render();
   }
 
-  function exportList() {
-    const result = API.dossiers.list(_filters, _sort, 1, 9999);
+  async function exportList() {
+    const result = await API.dossiers.list(_filters, _sort, 1, 9999);
     if (!result.success) { Utils.showToast('Không thể xuất dữ liệu', 'error'); return; }
     const deptMap = { telecom: 'Viễn thông', business: 'Kinh doanh', accounting: 'Kế toán' };
     const rows = result.data.map(d => ({
-      'Mã HS': d.id, 'Tên dự án': d.projectName,
-      'Số HĐ': d.contractNo || '', 'Phòng ban': deptMap[d.department] || d.department,
-      'Trạng thái': Utils.statusBadge(d.status).label,
-      'Ưu tiên': Utils.priorityBadge(d.priority).label,
-      'Giá trị': d.amount, 'Deadline': d.deadline || '',
-      'Người tạo': d.creatorName, 'Người xử lý': d.assigneeName,
-      'Ngày tạo': Utils.fmt.datetime(d.createdAt)
+      'Mã HS':       d.dossierId || d.id,
+      'Tên dự án':   d.projectName || '',
+      'Số HĐ':       d.contractNo || '',
+      'Phòng ban':   deptMap[d.department] || d.department || '',
+      'Trạng thái':  Utils.statusBadge(d.status).label,
+      'Ưu tiên':     Utils.priorityBadge(d.priority).label,
+      'Giá trị':     d.amount || 0,
+      'Deadline':    d.deadline || '',
+      'Người tạo':   d.creatorName || '',
+      'Người xử lý': d.assigneeName || '',
+      'Ngày tạo':    Utils.fmt.datetime(d.created_at || d.createdAt)
     }));
     Utils.exportCSV(rows, `ho-so-${new Date().toISOString().split('T')[0]}.csv`);
   }
@@ -686,14 +719,13 @@ ${buildTransitionModal()}
       </div>`;
   }
 
-  /* ─── Public ─── */
   return {
-    render, renderNew,
+    render, renderNew, loadTable,
     openDetail, openEdit, openForm,
     submitForm, submitTransition, openTransition,
     addComment, deleteDossier,
     applyFilter, onSearchInput, clearFilters, setSort,
-    exportList, loadTable
+    exportList
   };
 })();
 

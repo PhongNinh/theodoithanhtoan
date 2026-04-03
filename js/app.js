@@ -1,48 +1,58 @@
 /**
- * app.js - Khởi tạo ứng dụng, routing, và layout chính
- * PayTrack Pro
+ * app.js - Khởi tạo ứng dụng, routing (async-aware)
+ * PayTrack Pro v3.0
  */
 
 const App = (() => {
   'use strict';
 
   let _currentPage = null;
-  let _searchTimeout = null;
 
-  /* ─── Pages registry ─── */
   const PAGES = {
-    dashboard:    { title: 'Dashboard',          icon: 'fa-tachometer-alt', fn: () => PageDashboard.render() },
-    dossiers:     { title: 'Danh sách Hồ sơ',   icon: 'fa-folder-open',    fn: () => PageDossiers.render() },
-    dossier_new:  { title: 'Tạo Hồ sơ mới',     icon: 'fa-plus',           fn: () => PageDossiers.renderNew() },
-    kanban:       { title: 'Kanban Board',        icon: 'fa-columns',        fn: () => PageKanban.render() },
-    audit:        { title: 'Audit Log',           icon: 'fa-history',        fn: () => PageAudit.render() },
-    notifications:{ title: 'Thông báo',          icon: 'fa-bell',           fn: () => PageNotifications.render() },
-    reports:      { title: 'Báo cáo & Xuất',     icon: 'fa-chart-bar',      fn: () => PageReports.render() },
-    users:        { title: 'Quản lý Người dùng', icon: 'fa-users',          fn: () => PageUsers.render(), adminOnly: true },
-    settings:     { title: 'Cài đặt Hệ thống',  icon: 'fa-cog',            fn: () => PageSettings.render(), adminOnly: true },
-    security:     { title: 'Bảo mật',            icon: 'fa-shield-alt',     fn: () => PageSecurity.render(), adminOnly: true }
+    dashboard:     { title: 'Dashboard',          fn: () => PageDashboard.render() },
+    dossiers:      { title: 'Danh sách Hồ sơ',   fn: () => PageDossiers.render() },
+    dossier_new:   { title: 'Tạo Hồ sơ mới',     fn: () => PageDossiers.renderNew() },
+    kanban:        { title: 'Kanban Board',        fn: () => PageKanban.render() },
+    audit:         { title: 'Audit Log',           fn: () => PageAudit.render() },
+    notifications: { title: 'Thông báo',          fn: () => PageNotifications.render() },
+    reports:       { title: 'Báo cáo & Xuất',     fn: () => PageReports.render() },
+    users:         { title: 'Quản lý Người dùng', fn: () => PageUsers.render(), adminOnly: true },
+    settings:      { title: 'Cài đặt Hệ thống',  fn: () => PageSettings.render(), adminOnly: true },
+    security:      { title: 'Bảo mật',            fn: () => PageSecurity.render(), adminOnly: true }
   };
 
   /* ─── Bootstrap ─── */
-  function init() {
-    // Khởi tạo bảo mật đầu tiên
+  async function init() {
     if (window.Security) Security.init();
 
-    // Restore session
-    const loggedIn = Auth.init();
+    // Show loading while checking session
+    document.getElementById('loginPage')?.classList.add('hidden');
+    document.getElementById('appPage')?.classList.add('hidden');
+    showLoading(true);
 
-    if (loggedIn) {
-      showApp();
-    } else {
+    try {
+      const loggedIn = await Auth.init();
+      showLoading(false);
+      if (loggedIn) {
+        showApp();
+      } else {
+        showLogin();
+      }
+    } catch (e) {
+      showLoading(false);
       showLogin();
+      console.error('[App] Init error:', e);
     }
 
-    // Setup global handlers
     setupEventHandlers();
     setupSearch();
     startDeadlineChecker();
+    console.info('[App] PayTrack Pro v3.0 initialized');
+  }
 
-    console.info('[App] PayTrack Pro initialized');
+  function showLoading(show) {
+    const el = document.getElementById('appLoading');
+    if (el) el.style.display = show ? 'flex' : 'none';
   }
 
   /* ─── Auth UI ─── */
@@ -55,7 +65,6 @@ const App = (() => {
   function showApp() {
     document.getElementById('loginPage')?.classList.add('hidden');
     document.getElementById('appPage')?.classList.remove('hidden');
-
     const user = Auth.getCurrentUser();
     updateUserInfo(user);
     updateSidebarPermissions(user);
@@ -65,39 +74,22 @@ const App = (() => {
 
   function updateUserInfo(user) {
     if (!user) return;
-    const e = Security.e;
     const avatarEl = document.getElementById('userAvatar');
     const nameEl   = document.getElementById('userName');
     const roleEl   = document.getElementById('userRole');
-
-    if (avatarEl) {
-      avatarEl.textContent = e(user.avatar || '?');
-      avatarEl.style.background = e(user.color || '#6c757d');
-    }
-    if (nameEl) nameEl.textContent = user.displayName;
-    if (roleEl) roleEl.textContent = Auth.getRoleLabel(user.role);
-
-    // Body class for role-based CSS
-    document.body.className = `role-${e(user.role)}`;
+    if (avatarEl) { avatarEl.textContent = user.avatar || '?'; avatarEl.style.background = user.color || '#6c757d'; }
+    if (nameEl)   nameEl.textContent = user.displayName;
+    if (roleEl)   roleEl.textContent = Auth.getRoleLabel(user.role);
+    document.body.className = `role-${user.role}`;
     if (Auth.isAdmin()) document.body.classList.add('is-admin');
   }
 
   function updateSidebarPermissions(user) {
-    // Hiển thị/ẩn các mục admin
     document.querySelectorAll('.admin-only').forEach(el => {
       el.style.display = Auth.isAdmin() ? '' : 'none';
     });
-
-    // Ẩn nút tạo hồ sơ nếu không có quyền
     const createBtn = document.getElementById('navCreateDossier');
-    if (createBtn) {
-      createBtn.style.display = Auth.hasPermission('dossier.create') || Auth.isAdmin() ? '' : 'none';
-    }
-
-    // Cập nhật badge số hồ sơ
-    const count = DB.dossiers.getAll().length;
-    const badge = document.getElementById('dossierCount');
-    if (badge) badge.textContent = count;
+    if (createBtn) createBtn.style.display = (Auth.hasPermission('dossier.create') || Auth.isAdmin()) ? '' : 'none';
   }
 
   /* ─── Login Form ─── */
@@ -106,21 +98,17 @@ const App = (() => {
     const submitBtn = document.getElementById('loginBtn');
     const errorEl   = document.getElementById('loginError');
     const lockoutEl = document.getElementById('lockoutTimer');
-
     if (!form) return;
 
-    // Quick-fill demo accounts
     document.querySelectorAll('.demo-account').forEach(btn => {
       btn.addEventListener('click', () => {
-        const usernameEl = document.getElementById('loginUsername');
-        const passwordEl = document.getElementById('loginPassword');
-        if (usernameEl) usernameEl.value = Security.e(btn.dataset.user);
-        if (passwordEl) passwordEl.value = btn.dataset.pass;
-        // Không auto-submit để user thấy thông tin
+        const uEl = document.getElementById('loginUsername');
+        const pEl = document.getElementById('loginPassword');
+        if (uEl) uEl.value = btn.dataset.user;
+        if (pEl) pEl.value = btn.dataset.pass;
       });
     });
 
-    // Toggle password visibility
     const toggleBtn = document.getElementById('togglePassword');
     if (toggleBtn) {
       toggleBtn.addEventListener('click', () => {
@@ -134,270 +122,190 @@ const App = (() => {
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
-
       const username = document.getElementById('loginUsername')?.value || '';
       const password = document.getElementById('loginPassword')?.value || '';
-
       if (!username.trim() || !password) {
-        showFormError(errorEl, 'Vui lòng nhập đầy đủ tên đăng nhập và mật khẩu');
+        showErr(errorEl, 'Vui lòng nhập đầy đủ thông tin');
         return;
       }
-
       Utils.dom.setLoading(submitBtn, true, 'Đang xác thực...');
-      hideFormError(errorEl);
+      hideErr(errorEl);
+      lockoutEl?.classList.add('hidden');
 
       const result = await Auth.login(username, password);
-
       Utils.dom.setLoading(submitBtn, false);
 
       if (result.ok) {
         showApp();
       } else {
-        showFormError(errorEl, result.reason);
-
-        // Hiển thị đếm ngược nếu bị khóa
+        showErr(errorEl, result.reason);
         if (result.locked && lockoutEl) {
           lockoutEl.classList.remove('hidden');
-          startLockoutCountdown(result.remaining, lockoutEl, submitBtn, username);
+          startLockoutCountdown(result.remaining, lockoutEl, submitBtn);
         }
       }
     });
   }
 
-  function showFormError(el, message) {
-    if (!el) return;
-    el.textContent = message;
-    el.classList.remove('hidden');
-  }
+  function showErr(el, msg) { if (el) { el.textContent = msg; el.classList.remove('hidden'); } }
+  function hideErr(el)      { if (el) { el.classList.add('hidden'); el.textContent = ''; } }
 
-  function hideFormError(el) {
-    if (!el) return;
-    el.classList.add('hidden');
-    el.textContent = '';
-  }
-
-  function startLockoutCountdown(remainingMs, timerEl, submitBtn, username) {
-    submitBtn.disabled = true;
-    const end = Date.now() + remainingMs;
-
-    const interval = setInterval(() => {
+  function startLockoutCountdown(ms, timerEl, btn) {
+    btn.disabled = true;
+    const end = Date.now() + ms;
+    const iv  = setInterval(() => {
       const left = end - Date.now();
       if (left <= 0) {
-        clearInterval(interval);
+        clearInterval(iv);
         timerEl.classList.add('hidden');
-        submitBtn.disabled = false;
-        timerEl.textContent = '';
+        btn.disabled = false;
         return;
       }
       timerEl.textContent = `Thử lại sau: ${Security.RateLimiter.formatRemaining(left)}`;
     }, 1000);
   }
 
-  /* ─── Navigation / Routing ─── */
+  /* ─── Navigation ─── */
   function navigate(pageId, params = {}) {
     const page = PAGES[pageId];
     if (!page) { navigate('dashboard'); return; }
-
-    // Admin-only check
     if (page.adminOnly && !Auth.isAdmin()) {
       Utils.showToast('Bạn không có quyền truy cập trang này', 'error');
       return;
     }
 
     _currentPage = pageId;
-
-    // Update active nav
-    document.querySelectorAll('.nav-item').forEach(el => {
-      el.classList.toggle('active', el.dataset.page === pageId);
-    });
-
-    // Update breadcrumb / page title
+    document.querySelectorAll('.nav-item').forEach(el =>
+      el.classList.toggle('active', el.dataset.page === pageId));
     const titleEl = document.getElementById('pageTitle');
     if (titleEl) titleEl.textContent = page.title;
 
-    // Render page
     const content = document.getElementById('mainContent');
-    if (content) {
-      content.innerHTML = '<div class="page-loader"><i class="fas fa-spinner fa-spin"></i> Đang tải...</div>';
-    }
+    if (content) content.innerHTML = '<div class="page-loader"><i class="fas fa-spinner fa-spin"></i> Đang tải...</div>';
 
-    // Small delay for UX
-    setTimeout(() => {
+    setTimeout(async () => {
       try {
-        page.fn(params);
+        await page.fn(params);
       } catch (err) {
         console.error('[App] Page render error:', err);
-        if (content) {
-          content.innerHTML = `<div class="error-state"><i class="fas fa-exclamation-triangle"></i><p>Lỗi tải trang. Vui lòng thử lại.</p></div>`;
-        }
+        if (content) content.innerHTML = `<div class="error-state"><i class="fas fa-exclamation-triangle"></i><p>Lỗi tải trang: ${Security.e(err.message || '')}</p></div>`;
       }
-    }, 50);
+    }, 30);
   }
 
-  /* ─── Global Event Handlers ─── */
+  /* ─── Event Handlers ─── */
   function setupEventHandlers() {
-    // Sidebar navigation
     document.addEventListener('click', (e) => {
       const navItem = e.target.closest('[data-page]');
-      if (navItem && navItem.dataset.page) {
-        e.preventDefault();
-        navigate(navItem.dataset.page);
-        // Close mobile sidebar
-        document.getElementById('sidebar')?.classList.remove('open');
-      }
+      if (navItem?.dataset.page) { e.preventDefault(); navigate(navItem.dataset.page); document.getElementById('sidebar')?.classList.remove('open'); }
 
-      // Logout button
       if (e.target.closest('#logoutBtn')) {
         e.preventDefault();
-        Utils.Modal.confirm('Bạn có chắc muốn đăng xuất?', () => {
-          Auth.logout();
-          showLogin();
-        });
+        Utils.Modal.confirm('Bạn có chắc muốn đăng xuất?', () => { Auth.logout(); showLogin(); });
       }
+      if (e.target.closest('#sidebarToggle')) document.getElementById('sidebar')?.classList.toggle('open');
+      if (e.target.closest('#sidebarOverlay')) document.getElementById('sidebar')?.classList.remove('open');
+      if (e.target.closest('#notifBell')) navigate('notifications');
 
-      // Mobile sidebar toggle
-      if (e.target.closest('#sidebarToggle')) {
-        document.getElementById('sidebar')?.classList.toggle('open');
-      }
+      const cm = e.target.closest('[data-close-modal]');
+      if (cm) Utils.Modal.hide(cm.dataset.closeModal);
 
-      // Close sidebar on overlay click
-      if (e.target.closest('#sidebarOverlay')) {
-        document.getElementById('sidebar')?.classList.remove('open');
-      }
-
-      // Notification bell
-      if (e.target.closest('#notifBell')) {
-        navigate('notifications');
-      }
-
-      // Modal close buttons
-      const closeModal = e.target.closest('[data-close-modal]');
-      if (closeModal) {
-        Utils.Modal.hide(closeModal.dataset.closeModal);
-      }
-
-      // Modal backdrop click
       const modal = e.target.closest('.modal');
-      if (modal && e.target === modal) {
-        modal.classList.remove('active');
-        document.body.style.overflow = '';
-      }
+      if (modal && e.target === modal) { modal.classList.remove('active'); document.body.style.overflow = ''; }
     });
 
-    // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
-      // Ctrl+K = Search
-      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
-        e.preventDefault();
-        document.getElementById('globalSearch')?.focus();
-      }
-      // Escape = close modals
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') { e.preventDefault(); document.getElementById('globalSearch')?.focus(); }
       if (e.key === 'Escape') {
-        document.querySelectorAll('.modal.active').forEach(m => {
-          m.classList.remove('active');
-          document.body.style.overflow = '';
-        });
+        document.querySelectorAll('.modal.active').forEach(m => { m.classList.remove('active'); document.body.style.overflow = ''; });
         document.getElementById('searchResults')?.classList.add('hidden');
       }
-      // Ctrl+N = New dossier
-      if ((e.ctrlKey || e.metaKey) && e.key === 'n' && Auth.isLoggedIn()) {
-        e.preventDefault();
-        navigate('dossier_new');
-      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'n' && Auth.isLoggedIn()) { e.preventDefault(); navigate('dossier_new'); }
     });
   }
 
-  /* ─── Global Search ─── */
+  /* ─── Search ─── */
   function setupSearch() {
-    const searchInput  = document.getElementById('globalSearch');
-    const searchResult = document.getElementById('searchResults');
-    if (!searchInput || !searchResult) return;
+    const si = document.getElementById('globalSearch');
+    const sr = document.getElementById('searchResults');
+    if (!si || !sr) return;
 
-    searchInput.addEventListener('input', Utils.debounce(() => {
-      const q = Security.Validator.sanitizeQuery(searchInput.value).trim();
-      if (q.length < 2) { searchResult.classList.add('hidden'); return; }
+    si.addEventListener('input', Utils.debounce(async () => {
+      const q = Security.Validator.sanitizeQuery(si.value).trim();
+      if (q.length < 2) { sr.classList.add('hidden'); return; }
 
-      const result = API.dossiers.list({ search: q }, 'createdAt_desc', 1, 8);
+      sr.innerHTML = '<div class="search-item"><i class="fas fa-spinner fa-spin me-2"></i>Đang tìm...</div>';
+      sr.classList.remove('hidden');
+
+      const result = await API.dossiers.list({ search: q }, 'created_at_desc', 1, 8);
       if (!result.success || !result.data.length) {
-        searchResult.innerHTML = '<div class="search-item no-result">Không tìm thấy kết quả</div>';
-        searchResult.classList.remove('hidden');
+        sr.innerHTML = '<div class="search-item no-result">Không tìm thấy kết quả</div>';
         return;
       }
-
-      const html = result.data.map(d => {
+      sr.innerHTML = result.data.map(d => {
         const sb = Utils.statusBadge(d.status);
-        return `
-          <div class="search-item" data-id="${Security.e(d.id)}">
-            <span class="search-id">${Security.e(d.id)}</span>
-            <span class="search-name">${Utils.highlight(d.projectName, q)}</span>
-            <span class="badge ${Security.e(sb.class)}">${Security.e(sb.label)}</span>
-          </div>`;
+        return `<div class="search-item" data-id="${Security.e(d.dossierId || d.id)}">
+          <span class="search-id">${Security.e(d.dossierId || d.id)}</span>
+          <span class="search-name">${Utils.highlight(d.projectName, q)}</span>
+          <span class="badge ${Security.e(sb.class)}">${Security.e(sb.label)}</span>
+        </div>`;
       }).join('');
 
-      searchResult.innerHTML = html;
-      searchResult.classList.remove('hidden');
-
-      // Click kết quả
-      searchResult.querySelectorAll('.search-item[data-id]').forEach(el => {
+      sr.querySelectorAll('.search-item[data-id]').forEach(el => {
         el.addEventListener('click', () => {
-          searchInput.value = '';
-          searchResult.classList.add('hidden');
+          si.value = ''; sr.classList.add('hidden');
           navigate('dossiers');
-          setTimeout(() => PageDossiers.openDetail(el.dataset.id), 100);
+          setTimeout(() => PageDossiers.openDetail(el.dataset.id), 150);
         });
       });
-    }, 350));
+    }, 400));
 
-    // Click ngoài để đóng
     document.addEventListener('click', (e) => {
-      if (!searchInput.contains(e.target) && !searchResult.contains(e.target)) {
-        searchResult.classList.add('hidden');
-      }
+      if (!si.contains(e.target) && !sr.contains(e.target)) sr.classList.add('hidden');
     });
   }
 
   /* ─── Notification Badge ─── */
-  function loadNotificationBadge() {
+  async function loadNotificationBadge() {
     const user = Auth.getCurrentUser();
     if (!user) return;
-    const count  = DB.notifications.getUnreadCount(user.id);
-    const badge  = document.getElementById('notifBadge');
-    if (badge) {
-      badge.textContent = count > 9 ? '9+' : count;
-      badge.style.display = count > 0 ? 'flex' : 'none';
-    }
+    try {
+      const count = await DB.notifications.getUnreadCount(user.id);
+      const badge = document.getElementById('notifBadge');
+      if (badge) { badge.textContent = count > 9 ? '9+' : count; badge.style.display = count > 0 ? 'flex' : 'none'; }
+    } catch (e) { /* ignore */ }
   }
 
   /* ─── Deadline Checker ─── */
-  function startDeadlineChecker() {
-    const check = () => {
+  async function startDeadlineChecker() {
+    const check = async () => {
       if (!Auth.isLoggedIn()) return;
-      const overdue = DB.stats.overdue();
-      if (overdue.length > 0) {
-        const badge = document.getElementById('overdueBadge');
-        if (badge) {
-          badge.textContent = overdue.length;
-          badge.style.display = 'flex';
-        }
-      }
+      try {
+        const overdue = await DB.stats.overdue();
+        const badge   = document.getElementById('overdueBadge');
+        if (badge) { badge.textContent = overdue.length; badge.style.display = overdue.length ? 'flex' : 'none'; }
+      } catch (e) { /* ignore */ }
     };
-    check();
-    setInterval(check, 5 * 60 * 1000); // check mỗi 5 phút
+    await check();
+    setInterval(check, 5 * 60 * 1000);
   }
 
-  /* ─── Public ─── */
+  /* ─── Dossier count badge ─── */
+  async function updateDossierCount() {
+    try {
+      const all   = await DB.dossiers.getAll();
+      const badge = document.getElementById('dossierCount');
+      if (badge) badge.textContent = all.length;
+    } catch (e) { /* ignore */ }
+  }
+
   return {
-    init,
-    navigate,
-    showLogin,
-    showApp,
-    loadNotificationBadge,
+    init, navigate, showLogin, showApp,
+    loadNotificationBadge, updateDossierCount,
     getCurrentPage: () => _currentPage,
     PAGES
   };
 })();
 
 window.App = App;
-
-// Khởi động khi DOM sẵn sàng
 document.addEventListener('DOMContentLoaded', () => App.init());
