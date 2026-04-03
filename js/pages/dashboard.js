@@ -1,5 +1,6 @@
 /**
- * dashboard.js - Trang tổng quan
+ * dashboard.js - Trang tổng quan (async/await, Table API)
+ * PayTrack Pro v3.0
  */
 
 const PageDashboard = (() => {
@@ -12,18 +13,33 @@ const PageDashboard = (() => {
     _charts = {};
   }
 
-  function render() {
-    const user   = Auth.getCurrentUser();
-    const e      = Security.e;
-    const statsR = API.stats.dashboard();
-    if (!statsR.success) { Utils.showToast('Lỗi tải dữ liệu dashboard', 'error'); return; }
+  /* ─── Render chính (async) ─── */
+  async function render() {
+    const content = document.getElementById('mainContent');
+    content.innerHTML = `<div class="page-loader"><i class="fas fa-spinner fa-spin"></i> Đang tải dữ liệu...</div>`;
 
-    const stats  = statsR.data;
-    const overdue = DB.stats.overdue();
-    const dossiers = DB.dossiers.getAll();
+    const user = Auth.getCurrentUser();
+    const e    = Security.e;
 
-    // Recent (5 mới nhất)
-    const recent = [...dossiers].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 5);
+    // Lấy dữ liệu song song
+    const [statsR, overdueList, allDossiers] = await Promise.all([
+      API.stats.dashboard(),
+      DB.stats.overdue(),
+      DB.dossiers.getAll()
+    ]);
+
+    if (!statsR.success) {
+      content.innerHTML = `<div class="error-state"><i class="fas fa-exclamation-triangle"></i><p>Lỗi tải dữ liệu dashboard</p></div>`;
+      Utils.showToast('Lỗi tải dữ liệu dashboard', 'error');
+      return;
+    }
+
+    const stats = statsR.data;
+
+    // Recent 5 mới nhất (sort theo updated_at)
+    const recent = [...allDossiers]
+      .sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0))
+      .slice(0, 5);
 
     const html = `
 <div class="dashboard-page">
@@ -110,10 +126,10 @@ const PageDashboard = (() => {
   </div>
 
   <!-- Overdue alert -->
-  ${overdue.length ? `
+  ${overdueList.length ? `
   <div class="alert alert-danger mb-4">
     <i class="fas fa-exclamation-triangle me-2"></i>
-    <strong>${e(String(overdue.length))} hồ sơ quá hạn!</strong>
+    <strong>${e(String(overdueList.length))} hồ sơ quá hạn!</strong>
     <button class="btn btn-sm btn-danger ms-3" onclick="App.navigate('dossiers')">Xem ngay</button>
   </div>` : ''}
 
@@ -124,7 +140,9 @@ const PageDashboard = (() => {
       <button class="btn btn-sm btn-outline" onclick="App.navigate('dossiers')">Xem tất cả →</button>
     </div>
     <div class="card-body p-0">
-      <table class="table">
+      ${recent.length === 0
+        ? `<div class="empty-state"><i class="fas fa-folder-open"></i><p>Chưa có hồ sơ nào</p></div>`
+        : `<table class="table">
         <thead>
           <tr>
             <th>Mã HS</th><th>Tên dự án</th><th>Trạng thái</th>
@@ -135,28 +153,33 @@ const PageDashboard = (() => {
           ${recent.map(d => {
             const sb = Utils.statusBadge(d.status);
             const pb = Utils.priorityBadge(d.priority);
+            const did = e(d.dossierId || d.id || '');
             return `
-              <tr class="table-row clickable" onclick="App.navigate('dossiers');setTimeout(()=>PageDossiers.openDetail('${e(d.id)}'),100)">
-                <td><span class="mono">${e(d.id)}</span></td>
-                <td>${e(d.projectName)}</td>
+              <tr class="table-row clickable"
+                onclick="App.navigate('dossiers');setTimeout(()=>PageDossiers.openDetail('${did}'),120)">
+                <td><span class="mono">${e(d.dossierId || d.id || '')}</span></td>
+                <td>${e(d.projectName || '')}</td>
                 <td><span class="badge ${e(sb.class)}">${e(sb.label)}</span></td>
                 <td><span class="badge ${e(pb.class)}">${e(pb.label)}</span></td>
                 <td>${e(Utils.fmt.currency(d.amount))}</td>
-                <td>${e(Utils.fmt.timeAgo(d.updatedAt))}</td>
+                <td>${e(Utils.fmt.timeAgo(d.updated_at || d.created_at))}</td>
               </tr>`;
           }).join('')}
         </tbody>
-      </table>
+      </table>`}
     </div>
   </div>
 </div>`;
 
-    document.getElementById('mainContent').innerHTML = html;
+    content.innerHTML = html;
 
     // Render charts sau khi DOM ready
     destroyCharts();
     renderStatusChart(stats.byStatus);
     renderDeptChart(stats.byDept);
+
+    // Cập nhật dossier count badge
+    App.updateDossierCount && App.updateDossierCount();
   }
 
   function renderStatusChart(byStatus) {

@@ -1,178 +1,113 @@
-# PayTrack Pro v2.0
-## Hệ thống Quản lý Hồ sơ Thanh toán Doanh nghiệp
+# PayTrack Pro v3.0 — Hệ thống Quản lý Hồ sơ Thanh toán
 
----
+## ✅ Tính năng đã hoàn thành
 
-## 🚀 Tính năng đã hoàn thành
+### 🗄️ Database (Server-side, Persistent)
+- **RESTful Table API** — dữ liệu lưu trên server, không phụ thuộc localStorage
+- Dữ liệu **chia sẻ** giữa mọi user/thiết bị/trình duyệt
+- **Không mất dữ liệu** khi clear cache hay đổi trình duyệt
+- Tables: `pt_users`, `pt_dossiers`, `pt_history`, `pt_notifications`, `pt_audit`, `pt_comments`
 
-### 🔐 Bảo mật (Client-side tối đa)
-- **XSS Prevention**: Escape HTML entities, sanitize tất cả input/output, loại bỏ script tags
-- **Rate Limiting / Brute-force**: Khóa tài khoản sau 5 lần thất bại trong 15 phút, đếm ngược unlock
-- **SHA-256 Password Hashing**: Mật khẩu được hash với salt trước khi lưu/so sánh
-- **Session Timeout**: Auto-logout sau 30 phút không hoạt động, cảnh báo 5 phút trước
-- **Content Security Policy (CSP)**: Meta tag ngăn script/style injection
-- **CSRF Token**: Token duy nhất mỗi phiên làm việc
-- **Clickjacking Protection**: Phát hiện và chặn iframe embedding
-- **Secure Storage**: Session data obfuscated trong sessionStorage (base64 + JSON)
-- **Input Validation**: Schema validation cho tất cả form inputs
-- **NoSQL Injection Prevention**: Loại bỏ $operators trong queries
-- **Audit Logging**: Ghi nhận toàn bộ hành động trong hệ thống
-- **Security Dashboard**: Admin xem security events realtime
+### 🔐 Bảo mật (client-side)
+- **XSS Protection**: sanitize input/output, escape HTML entities (`Security.e()`)
+- **SHA-256 Password Hashing**: hash trước khi gửi lên DB
+- **Rate Limiting**: khóa tài khoản sau 5 lần thất bại / 15 phút
+- **Session Timeout**: tự đăng xuất sau 30 phút không hoạt động
+- **CSRF Token**: token duy nhất mỗi phiên
+- **CSP Meta Tags**: ngăn inline script injection
+- **Clickjacking Protection**: phát hiện iframe embedding
+- **Input Validation**: schema validate toàn bộ inputs
+- **Secure Session Storage**: session data obfuscated trong sessionStorage
+- **Audit Logging**: ghi nhận mọi hành động vào `pt_audit`
 
-### 📋 Quản lý Hồ sơ
-- CRUD đầy đủ: Tạo, xem, sửa, xóa hồ sơ
-- 10 hồ sơ mẫu với đầy đủ dữ liệu
-- Filter đa chiều: status, phòng ban, ưu tiên, ngày, tìm kiếm
-- Sort nhiều chiều: ngày tạo, giá trị, deadline
-- Pagination 10 records/trang
+### 🏢 Quản lý Hồ sơ
+- CRUD hồ sơ với 7 trạng thái workflow
+- Kanban board trực quan
+- Tìm kiếm, lọc, sắp xếp đa tiêu chí
+- Chi tiết hồ sơ với lịch sử workflow + bình luận + QR code
+- Chuyển trạng thái có phân quyền theo vai trò
+
+### 👥 Quản lý Người dùng (Admin)
+- CRUD users với async API calls
+- Phân quyền 4 vai trò: Admin, Viễn thông, Kinh doanh, Kế toán
+- Khóa/mở khóa tài khoản
+- Đổi mật khẩu có kiểm tra độ mạnh
+
+### 📊 Báo cáo & Dashboard
+- Dashboard tổng quan với KPI cards và biểu đồ Chart.js
+- Báo cáo chi tiết: trạng thái, phòng ban, xu hướng, ưu tiên
 - Xuất CSV
+- Audit log với filter và export
 
-### 🔄 Workflow 7 bước
-```
-Đã tạo → Đã nộp → Đã xác minh → Gửi Kế toán → Đã duyệt → Đã thanh toán → Lưu trữ
-```
-- Visual progress bar trong detail modal
-- Chỉ cho phép transition hợp lệ theo role
-- Ghi lịch sử mỗi lần chuyển trạng thái + ghi chú
+## 🔗 Entry Points
 
-### 👥 RBAC (Phân quyền theo vai trò)
-| Vai trò | Quyền |
-|---------|-------|
-| Admin | Toàn quyền, quản lý users, security dashboard |
-| Viễn thông | Xem/xử lý hồ sơ, xác minh, gửi kế toán |
-| Kinh doanh | Tạo hồ sơ, theo dõi, nộp hồ sơ |
-| Kế toán | Phê duyệt, đánh dấu đã thanh toán, lưu trữ, xem báo cáo |
+| Path | Mô tả |
+|------|-------|
+| `index.html` | Trang chính, tự redirect đến login hoặc dashboard |
+| `tables/pt_users` | API người dùng |
+| `tables/pt_dossiers` | API hồ sơ |
+| `tables/pt_history` | API lịch sử workflow |
+| `tables/pt_notifications` | API thông báo |
+| `tables/pt_audit` | API audit log |
+| `tables/pt_comments` | API bình luận |
 
-### 📊 Dashboard & Báo cáo
-- KPI cards: Tổng hồ sơ, quá hạn, tỷ lệ hoàn thành, tổng giá trị
-- Charts: Phân bổ theo trạng thái (pie), phòng ban (bar), xu hướng (line), ưu tiên (doughnut)
-- Bảng thống kê chi tiết theo trạng thái
-- Xuất CSV/Excel báo cáo
-
-### 🔔 Thông báo
-- In-app notifications cho: hồ sơ mới được giao, thay đổi trạng thái, deadline, phê duyệt
-- Badge count trên icon
-- Đánh dấu đọc / đọc tất cả
-
-### 📅 Kanban Board
-- 7 cột tương ứng 7 trạng thái workflow
-- Cards với màu sắc theo priority, deadline indicator
-- Filter theo phòng ban
-- Click card mở detail
-
-### 🔍 Tìm kiếm & Lọc
-- Global search (Ctrl+K): tìm theo ID, tên dự án
-- Filter đa điều kiện trong trang danh sách
-- Highlight kết quả tìm kiếm
-
-### 📜 Audit Log
-- Ghi nhận toàn bộ hành động: đăng nhập, tạo/sửa/xóa, chuyển trạng thái
-- Filter theo loại hành động, người thực hiện
-- Xuất CSV
-
-### ⚙️ Cài đặt
-- Đổi mật khẩu với strength indicator
-- Xuất backup JSON
-- Reset về dữ liệu mẫu (Admin)
-
----
-
-## 🗂 Cấu trúc file
-
-```
-index.html              # Entry point
-css/
-  style.css             # Full stylesheet (~37KB)
-js/
-  security.js           # Security module (XSS, rate-limit, session, CSRF)
-  data.js               # Database layer (localStorage)
-  auth.js               # Authentication & RBAC
-  utils.js              # Utilities, formatters, DOM helpers
-  api.js                # Internal API với validation
-  app.js                # App bootstrap, routing, layout
-  pages/
-    dashboard.js        # Trang tổng quan
-    dossiers.js         # Quản lý hồ sơ
-    kanban.js           # Kanban board
-    audit.js            # Audit log
-    notifications.js    # Thông báo
-    reports.js          # Báo cáo & analytics
-    users.js            # Quản lý người dùng (Admin)
-    settings.js         # Cài đặt hệ thống
-    security-dashboard.js # Security monitoring (Admin)
-```
-
----
-
-## 🔑 Tài khoản demo
+## 👤 Tài khoản Demo
 
 | Username | Password | Vai trò |
 |----------|----------|---------|
-| admin | admin123 | Quản trị viên |
-| vt_tuan | 123456 | Nhân viên Viễn thông |
-| vt_lan | 123456 | Nhân viên Viễn thông |
-| kd_minh | 123456 | Nhân viên Kinh doanh |
-| kd_huong | 123456 | Nhân viên Kinh doanh |
-| kt_hung | 123456 | Nhân viên Kế toán |
-| kt_nga | 123456 | Nhân viên Kế toán |
+| `admin` | `admin123` | Quản trị viên (full access) |
+| `vt_tuan` | `123456` | Nhân viên Viễn thông |
+| `kd_minh` | `123456` | Nhân viên Kinh doanh |
+| `kt_hung` | `123456` | Nhân viên Kế toán |
 
----
+## 🗂️ Cấu trúc File
 
-## 💾 Data Model
+```
+index.html                    # Main HTML (CSP meta, login UI, app UI)
+css/style.css                 # Toàn bộ styles (39KB)
+js/
+  security.js                 # Security module (XSS, CSP, Rate limit, Session, CSRF, SHA-256)
+  data.js                     # Database layer (RESTful Table API wrapper, cache 30s TTL)
+  auth.js                     # Authentication & RBAC (login, logout, session, register)
+  utils.js                    # Utilities (format, badge, modal, pagination, export)
+  api.js                      # Internal API layer (validation, RBAC check, enrich data)
+  app.js                      # App bootstrap & routing
+  pages/
+    dashboard.js              # Trang tổng quan (KPI + charts)
+    dossiers.js               # Danh sách & CRUD hồ sơ
+    kanban.js                 # Kanban board
+    audit.js                  # Audit log viewer
+    notifications.js          # Thông báo
+    reports.js                # Báo cáo & analytics
+    users.js                  # Quản lý người dùng (Admin)
+    settings.js               # Cài đặt & đổi mật khẩu
+    security-dashboard.js     # Dashboard bảo mật (Admin)
+```
 
-Lưu trữ trong **localStorage** (browser), persist qua refresh.
+## 🏗️ Kiến trúc Data Flow
 
-| Collection | Mô tả |
-|-----------|-------|
-| users | Tài khoản người dùng (không lưu plain password) |
-| dossiers | Hồ sơ thanh toán |
-| statusHistory | Lịch sử workflow mỗi hồ sơ |
-| notifications | Thông báo in-app |
-| auditLogs | Nhật ký hành động |
-| comments | Bình luận theo hồ sơ |
+```
+User Action (UI)
+  → Pages/*.js (async/await)
+    → API layer (api.js) — validation + RBAC check
+      → DB layer (data.js) — cache + RESTful Table API
+        → Server (tables/{table}) — persistent storage
+```
 
----
+## ⚠️ Giới hạn Client-side Security
 
-## ⌨️ Phím tắt
+- SHA-256 hash phía client — yếu hơn bcrypt server-side
+- Rate limiting chỉ ngăn brute-force tại UI, không ngăn direct API calls
+- Session token lưu trong sessionStorage (xóa khi đóng tab)
 
-| Phím | Chức năng |
-|------|-----------|
-| Ctrl+K | Mở thanh tìm kiếm |
-| Ctrl+N | Tạo hồ sơ mới |
-| Esc | Đóng modal / search |
+## 🚀 Deploy
 
----
+Click **Publish tab** để publish lên production. Dữ liệu được lưu trên server — **tất cả user đều thấy cùng dữ liệu**.
 
-## 🛡 Giới hạn bảo mật client-side
+## 📌 Các bước tiếp theo (nếu cần nâng cấp)
 
-Đây là phiên bản **static web app** - không có server. Các giới hạn:
-
-1. ❌ Không thể ẩn connection string DB
-2. ❌ SHA-256 client-side yếu hơn bcrypt server-side
-3. ❌ Rate limiting chỉ ngăn tại UI (không ngăn API call trực tiếp)
-4. ❌ Dữ liệu localStorage không mã hóa hoàn toàn
-
-**Cho production thực tế:** Cần backend Node.js + MongoDB với bcrypt, JWT, HTTPS, rate-limiting server-side.
-
----
-
-## 🚀 Triển khai
-
-Mở tab **Publish** trong editor để deploy lên internet ngay lập tức.
-
----
-
-## 📈 Các tính năng chưa triển khai
-
-- [ ] Real-time WebSocket (cần backend)
-- [ ] Email notifications (cần SMTP server)
-- [ ] File attachments (cần file storage)
-- [ ] Digital signatures
-- [ ] OCR document scanning
-- [ ] QR tracking nâng cao
-- [ ] Export PDF (cần thư viện)
-- [ ] AI workflow suggestions
-
----
-
-*PayTrack Pro v2.0 | Security Module v2.0.0 | © 2024*
+1. Thêm backend Node.js với bcrypt + JWT cho bảo mật thực sự
+2. Thêm file upload cho đính kèm hồ sơ
+3. Thêm email notification thực
+4. Thêm export PDF với pdfmake
+5. Thêm 2FA (Two-Factor Authentication)
