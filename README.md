@@ -1,113 +1,205 @@
-# PayTrack Pro v3.0 — Hệ thống Quản lý Hồ sơ Thanh toán
+# PayTrack Pro — Enterprise Payment Dossier Management System
+
+> **Hệ thống Quản lý Hồ sơ Thanh toán** dành cho 3 phòng ban: Viễn thông, Kinh doanh, Kế toán
+
+---
+
+## 🎯 Mục tiêu
+
+- **Không mất hồ sơ** — mọi tài liệu đều được theo dõi toàn bộ vòng đời
+- **Theo dõi đầy đủ** — lịch sử từng bước, ai làm gì, khi nào
+- **Phân công rõ ràng** — trách nhiệm minh bạch theo phòng ban
+- **Giám sát thời gian thực** — dashboard, cảnh báo quá hạn, thông báo
+
+---
 
 ## ✅ Tính năng đã hoàn thành
 
-### 🗄️ Database (Server-side, Persistent)
-- **RESTful Table API** — dữ liệu lưu trên server, không phụ thuộc localStorage
-- Dữ liệu **chia sẻ** giữa mọi user/thiết bị/trình duyệt
-- **Không mất dữ liệu** khi clear cache hay đổi trình duyệt
-- Tables: `pt_users`, `pt_dossiers`, `pt_history`, `pt_notifications`, `pt_audit`, `pt_comments`
+### 🔐 Xác thực & Phân quyền (RBAC)
+- Đăng nhập / Đăng xuất với session persistence
+- 4 vai trò: Admin, Viễn thông, Kinh doanh, Kế toán
+- Điều hướng và giao diện thay đổi theo role
+- Protected routes dựa trên permission matrix
 
-### 🔐 Bảo mật (client-side)
-- **XSS Protection**: sanitize input/output, escape HTML entities (`Security.e()`)
-- **SHA-256 Password Hashing**: hash trước khi gửi lên DB
-- **Rate Limiting**: khóa tài khoản sau 5 lần thất bại / 15 phút
-- **Session Timeout**: tự đăng xuất sau 30 phút không hoạt động
-- **CSRF Token**: token duy nhất mỗi phiên
-- **CSP Meta Tags**: ngăn inline script injection
-- **Clickjacking Protection**: phát hiện iframe embedding
-- **Input Validation**: schema validate toàn bộ inputs
-- **Secure Session Storage**: session data obfuscated trong sessionStorage
-- **Audit Logging**: ghi nhận mọi hành động vào `pt_audit`
+### 📂 Quản lý Hồ sơ Thanh toán
+- Tạo / Sửa / Xóa (soft-delete) hồ sơ
+- Auto-generate mã hồ sơ (HS-2024-XXX)
+- Đầy đủ trường: tên dự án, số HĐ, phòng ban, người phụ trách, ưu tiên, giá trị, deadline
+- Phân trang, tìm kiếm, lọc đa tiêu chí
+- Bình luận nội bộ theo từng hồ sơ
 
-### 🏢 Quản lý Hồ sơ
-- CRUD hồ sơ với 7 trạng thái workflow
-- Kanban board trực quan
-- Tìm kiếm, lọc, sắp xếp đa tiêu chí
-- Chi tiết hồ sơ với lịch sử workflow + bình luận + QR code
-- Chuyển trạng thái có phân quyền theo vai trò
+### 🔄 Workflow 7 bước
+1. **Khởi tạo** (Created) — Kinh doanh/Viễn thông tạo
+2. **Đã nộp** (Submitted) — Nộp cho Viễn thông
+3. **Đã xác minh** (Verified) — Viễn thông xác nhận
+4. **Chờ Kế toán** (Sent to Accounting) — Chuyển Kế toán
+5. **Đã phê duyệt** (Approved) — Kế toán phê duyệt
+6. **Đã thanh toán** (Paid) — Hoàn tất
+7. **Lưu trữ** (Archived) — Archive
+
+- Mỗi chuyển đổi có validation theo role
+- Không thể bỏ qua bước (trừ Admin)
+
+### 📊 Dashboard & Phân tích
+- Thống kê KPI: tổng hồ sơ, đang xử lý, đã phê duyệt, quá hạn, giá trị
+- Pipeline workflow bar trực quan
+- Biểu đồ: donut (trạng thái), bar (phòng ban), line (xu hướng), priority
+- Danh sách hồ sơ quá hạn/sắp hạn
+- Activity feed thời gian thực
+
+### 🖥️ Kanban Board
+- 7 cột theo workflow steps
+- Cards có màu theo mức ưu tiên
+- Cảnh báo overdue, deadline countdown
+- Click để xem chi tiết / đổi trạng thái
+
+### 📋 Audit Log (Bất biến)
+- Mọi hành động đều được ghi log: tạo, sửa, đổi status, bình luận
+- Before/After values
+- Lọc theo action type, người dùng, mã hồ sơ
+- Timeline UI trực quan
+- Xuất CSV
+
+### 🔔 Hệ thống Thông báo
+- In-app notifications theo user
+- Phân loại: assignment, status_change, deadline, comment, approval
+- Đánh dấu đã đọc / đọc tất cả
+- Badge realtime trên sidebar
+
+### 📤 Báo cáo & Xuất dữ liệu
+- Báo cáo đầy đủ với charts: status, dept, trend, priority
+- Filter theo date range, phòng ban, trạng thái
+- Xuất CSV/Excel với UTF-8 (tiếng Việt)
+- Backup toàn bộ dữ liệu JSON
 
 ### 👥 Quản lý Người dùng (Admin)
-- CRUD users với async API calls
-- Phân quyền 4 vai trò: Admin, Viễn thông, Kinh doanh, Kế toán
-- Khóa/mở khóa tài khoản
-- Đổi mật khẩu có kiểm tra độ mạnh
+- CRUD người dùng
+- Phân role và phòng ban
+- Vô hiệu hoá tài khoản (soft-delete)
+- Thống kê hồ sơ theo user
 
-### 📊 Báo cáo & Dashboard
-- Dashboard tổng quan với KPI cards và biểu đồ Chart.js
-- Báo cáo chi tiết: trạng thái, phòng ban, xu hướng, ưu tiên
-- Xuất CSV
-- Audit log với filter và export
+### 🔍 Tìm kiếm & Lọc
+- Global search (Ctrl+K) theo mã HS, tên dự án, số HĐ
+- Filter đa tiêu chí: status, dept, priority, assigned_to, date range
+- Search results dropdown
 
-## 🔗 Entry Points
+### 📱 QR Code Tracking
+- Mỗi hồ sơ có QR code riêng
+- QR chứa: mã HS, tên dự án, trạng thái, giá trị
 
-| Path | Mô tả |
-|------|-------|
-| `index.html` | Trang chính, tự redirect đến login hoặc dashboard |
-| `tables/pt_users` | API người dùng |
-| `tables/pt_dossiers` | API hồ sơ |
-| `tables/pt_history` | API lịch sử workflow |
-| `tables/pt_notifications` | API thông báo |
-| `tables/pt_audit` | API audit log |
-| `tables/pt_comments` | API bình luận |
+### ⚙️ Cài đặt
+- Hồ sơ cá nhân (tên, email, mật khẩu)
+- System info
+- Database schema overview
+- Workflow config
+- Backup & Reset
 
-## 👤 Tài khoản Demo
+---
 
-| Username | Password | Vai trò |
-|----------|----------|---------|
-| `admin` | `admin123` | Quản trị viên (full access) |
-| `vt_tuan` | `123456` | Nhân viên Viễn thông |
-| `kd_minh` | `123456` | Nhân viên Kinh doanh |
-| `kt_hung` | `123456` | Nhân viên Kế toán |
+## 🔑 Tài khoản Demo
 
-## 🗂️ Cấu trúc File
+| Username | Password | Vai trò | Phòng ban |
+|---|---|---|---|
+| `admin` | `admin123` | Quản trị viên | Admin |
+| `vt_tuan` | `123456` | Nhân viên VT | Phòng Viễn thông |
+| `vt_huong` | `123456` | Nhân viên VT | Phòng Viễn thông |
+| `kd_minh` | `123456` | Nhân viên KD | Phòng Kinh doanh |
+| `kd_lan` | `123456` | Nhân viên KD | Phòng Kinh doanh |
+| `kt_hung` | `123456` | Nhân viên KT | Phòng Kế toán |
+| `kt_mai` | `123456` | Nhân viên KT | Phòng Kế toán |
+
+---
+
+## 🗂️ Cấu trúc dự án
 
 ```
-index.html                    # Main HTML (CSP meta, login UI, app UI)
-css/style.css                 # Toàn bộ styles (39KB)
+index.html              — Entry point
+css/
+  style.css             — Toàn bộ CSS (design system)
 js/
-  security.js                 # Security module (XSS, CSP, Rate limit, Session, CSRF, SHA-256)
-  data.js                     # Database layer (RESTful Table API wrapper, cache 30s TTL)
-  auth.js                     # Authentication & RBAC (login, logout, session, register)
-  utils.js                    # Utilities (format, badge, modal, pagination, export)
-  api.js                      # Internal API layer (validation, RBAC check, enrich data)
-  app.js                      # App bootstrap & routing
+  data.js               — Static data store & workflow config
+  auth.js               — Authentication & RBAC
+  utils.js              — Utilities & formatters
+  api.js                — API layer (simulated backend)
+  app.js                — Main app controller
   pages/
-    dashboard.js              # Trang tổng quan (KPI + charts)
-    dossiers.js               # Danh sách & CRUD hồ sơ
-    kanban.js                 # Kanban board
-    audit.js                  # Audit log viewer
-    notifications.js          # Thông báo
-    reports.js                # Báo cáo & analytics
-    users.js                  # Quản lý người dùng (Admin)
-    settings.js               # Cài đặt & đổi mật khẩu
-    security-dashboard.js     # Dashboard bảo mật (Admin)
+    dashboard.js        — Dashboard & analytics
+    dossiers.js         — Dossier list, create, detail
+    kanban.js           — Kanban board
+    audit.js            — Audit trail
+    notifications.js    — Notifications
+    reports.js          — Reports & charts
+    users.js            — User management
+    settings.js         — Settings
 ```
 
-## 🏗️ Kiến trúc Data Flow
+---
 
-```
-User Action (UI)
-  → Pages/*.js (async/await)
-    → API layer (api.js) — validation + RBAC check
-      → DB layer (data.js) — cache + RESTful Table API
-        → Server (tables/{table}) — persistent storage
-```
+## 🗄️ Mô hình Dữ liệu
 
-## ⚠️ Giới hạn Client-side Security
+### users
+`id, username, full_name, email, password, role, department, avatar, is_active`
 
-- SHA-256 hash phía client — yếu hơn bcrypt server-side
-- Rate limiting chỉ ngăn brute-force tại UI, không ngăn direct API calls
-- Session token lưu trong sessionStorage (xóa khi đóng tab)
+### dossiers
+`id, dossier_code, project_name, contract_number, department, created_by_*, assigned_to_*, assigned_department, status, priority, amount, deadline, description, notes, tags, is_deleted, created_at`
 
-## 🚀 Deploy
+### audit_logs
+`id, dossier_id, dossier_code, user_id, user_name, user_role, action, field_changed, old_value, new_value, comment, ip_address, timestamp`
 
-Click **Publish tab** để publish lên production. Dữ liệu được lưu trên server — **tất cả user đều thấy cùng dữ liệu**.
+### notifications
+`id, user_id, dossier_id, dossier_code, type, title, message, is_read, priority, created_at`
 
-## 📌 Các bước tiếp theo (nếu cần nâng cấp)
+### comments
+`id, dossier_id, user_id, user_name, user_role, content, is_internal, is_deleted, created_at`
 
-1. Thêm backend Node.js với bcrypt + JWT cho bảo mật thực sự
-2. Thêm file upload cho đính kèm hồ sơ
-3. Thêm email notification thực
-4. Thêm export PDF với pdfmake
-5. Thêm 2FA (Two-Factor Authentication)
+---
+
+## 🔄 Ma trận Phân quyền
+
+| Hành động | Admin | Viễn thông | Kinh doanh | Kế toán |
+|---|---|---|---|---|
+| Tạo hồ sơ | ✅ | ✅ | ✅ | ❌ |
+| Sửa hồ sơ | ✅ | ✅ | ✅ | ❌ |
+| Xóa hồ sơ | ✅ | ❌ | ❌ | ❌ |
+| Đổi trạng thái | ✅ (all) | ✅ (1-3) | ✅ (1-2) | ✅ (4-7) |
+| Phê duyệt | ✅ | ❌ | ❌ | ✅ |
+| Đánh dấu Paid | ✅ | ❌ | ❌ | ✅ |
+| Quản lý Users | ✅ | ❌ | ❌ | ❌ |
+| Xuất báo cáo | ✅ | ❌ | ❌ | ✅ |
+
+---
+
+## ⌨️ Phím tắt
+
+- `Ctrl+K` — Mở global search
+- `Ctrl+N` — Tạo hồ sơ mới (nếu có quyền)
+- `Esc` — Đóng modal / search
+
+---
+
+## 🚧 Tính năng chưa triển khai (cần backend thực)
+
+- [ ] JWT Authentication thực (backend Node.js)
+- [ ] Lưu trữ file đính kèm (AWS S3 / local)
+- [ ] WebSocket thời gian thực
+- [ ] Email notifications
+- [ ] OCR scan tài liệu
+- [ ] Digital signature
+- [ ] AI workflow suggestions
+- [ ] PostgreSQL + Prisma ORM
+- [ ] bcrypt password hashing
+
+---
+
+## 🚀 Hướng phát triển tiếp theo
+
+1. **Backend API** — Node.js + Express + Prisma + PostgreSQL
+2. **File Attachments** — Upload PDF, Excel, ảnh lên AWS S3
+3. **Email System** — Nodemailer với SMTP
+4. **WebSocket** — Socket.io cho realtime notifications
+5. **Docker** — Containerize toàn bộ stack
+6. **Testing** — Jest unit tests, Cypress E2E
+
+---
+
+*PayTrack Pro v1.0.0 — Enterprise Payment Dossier Tracking System*

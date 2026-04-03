@@ -1,353 +1,337 @@
-/**
- * api.js - Internal API layer (async, validation, RBAC)
- * PayTrack Pro v3.0
- */
+/* ===========================
+   PayTrack Pro - API Layer
+   Simulates backend REST API
+   =========================== */
 
-const API = (() => {
-  'use strict';
+window.API = {
+  /* ---- DOSSIERS ---- */
+  async getDossiers(filters={}) {
+    await this._delay(100);
+    let data = [...DB.dossiers];
+    if (!Auth.isAdmin) {
+      data = data.filter(d => Auth.canViewDossier(d));
+    }
+    return Utils.filterDossiers(data, filters);
+  },
 
-  function ok(data, meta = {})    { return { success: true,  data, ...meta }; }
-  function err(msg, code = 400)   { return { success: false, error: msg, code }; }
-  function authCheck()             { return Auth.isLoggedIn() ? null : err('Chưa xác thực', 401); }
+  async getDossier(id) {
+    await this._delay(80);
+    return DB.dossiers.find(d => d.id === id && !d.is_deleted) || null;
+  },
 
-  /* ─── Enrich dossier with user names ─── */
-  async function enrich(d, allUsers) {
-    const creator  = allUsers.find(u => u.id === d.creatorId);
-    const assignee = allUsers.find(u => u.id === d.assigneeId);
-    return {
-      ...d,
-      dossierId:     d.dossierId || d.id,
-      creatorName:   creator?.displayName   || 'N/A',
-      assigneeName:  assignee?.displayName  || 'Chưa giao',
-      creatorAvatar:  creator?.avatar,
-      assigneeAvatar: assignee?.avatar,
-      creatorColor:   creator?.color,
-      assigneeColor:  assignee?.color,
-      deadlineInfo:  Utils.deadlineStatus(d.deadline)
+  async createDossier(payload) {
+    await this._delay(200);
+    const newId = DB.newId();
+    const code = DB.getNextDossierCode();
+    const dossier = {
+      id: newId,
+      dossier_code: code,
+      is_deleted: false,
+      status: 'created',
+      created_by_id: Auth.userId,
+      created_by_name: Auth.user.full_name,
+      created_at: new Date().toISOString(),
+      ...payload
     };
-  }
+    DB.dossiers.push(dossier);
 
-  /* ─── Sanitize output ─── */
-  function safeUser(u) {
-    if (!u) return null;
-    const { passwordHash, _plainPwd, ...safe } = u;
-    return safe;
-  }
+    // Audit log
+    this._addAuditLog({
+      dossier_id: newId,
+      dossier_code: code,
+      action: 'create',
+      field_changed: 'status',
+      old_value: null,
+      new_value: 'created',
+      comment: `Tạo hồ sơ mới: ${dossier.project_name}`
+    });
 
-  /* ─── Dossiers ─── */
-  const dossiers = {
-    async list(filters = {}, sort = 'createdAt_desc', page = 1, limit = 20) {
-      const ae = authCheck(); if (ae) return ae;
-      const user  = Auth.getCurrentUser();
-      const users = await DB.users.getAll();
-      let list    = await DB.dossiers.getAll();
-
-      // Filter by role
-      if (user.role === 'business') {
-        list = list.filter(d => d.creatorId === user.id || d.department === 'business');
-      }
-
-      // Apply filters
-      if (filters.status)     list = list.filter(d => d.status     === filters.status);
-      if (filters.department) list = list.filter(d => d.department === filters.department);
-      if (filters.priority)   list = list.filter(d => d.priority   === filters.priority);
-      if (filters.assigneeId) list = list.filter(d => d.assigneeId === filters.assigneeId);
-      if (filters.creatorId)  list = list.filter(d => d.creatorId  === filters.creatorId);
-      if (filters.search) {
-        const q = Security.Validator.sanitizeQuery(filters.search).toLowerCase();
-        list = list.filter(d =>
-          (d.dossierId || d.id || '').toLowerCase().includes(q) ||
-          (d.projectName || '').toLowerCase().includes(q) ||
-          (d.contractNo  || '').toLowerCase().includes(q)
-        );
-      }
-      if (filters.dateFrom) {
-        const from = new Date(filters.dateFrom).getTime();
-        list = list.filter(d => new Date(d.created_at || 0).getTime() >= from);
-      }
-      if (filters.dateTo) {
-        const to = new Date(filters.dateTo).getTime() + 86400000;
-        list = list.filter(d => new Date(d.created_at || 0).getTime() <= to);
-      }
-      if (filters.overdue) {
-        const now = Date.now();
-        list = list.filter(d => d.deadline && new Date(d.deadline).getTime() < now && !['paid','archived'].includes(d.status));
-      }
-
-      // Sort
-      const [sf, sd] = sort.split('_');
-      const sortMap  = { createdAt: 'created_at', updatedAt: 'updated_at', amount: 'amount', deadline: 'deadline' };
-      const sf2      = sortMap[sf] || sf;
-      list.sort((a, b) => {
-        let va = a[sf2], vb = b[sf2];
-        if (sf === 'amount') { va = Number(va); vb = Number(vb); }
-        if (va < vb) return sd === 'asc' ? -1 :  1;
-        if (va > vb) return sd === 'asc' ?  1 : -1;
-        return 0;
+    // Notify assigned user
+    if (payload.assigned_to_id && payload.assigned_to_id !== Auth.userId) {
+      this._addNotification({
+        user_id: payload.assigned_to_id,
+        dossier_id: newId,
+        dossier_code: code,
+        type: 'assignment',
+        title: 'Hồ sơ mới được giao',
+        message: `Hồ sơ ${code} "${dossier.project_name}" đã được giao cho bạn.`,
+        priority: payload.priority || 'medium'
       });
+    }
 
-      const total   = list.length;
-      const paged   = list.slice((page - 1) * limit, page * limit);
-      const enriched = await Promise.all(paged.map(d => enrich(d, users)));
-      return ok(enriched, { total, page, limit, totalPages: Math.ceil(total / limit) });
-    },
+    return dossier;
+  },
 
-    async getById(id) {
-      const ae = authCheck(); if (ae) return ae;
-      const cleanId = Security.XSS.sanitizeInput(id);
-      const dossier = await DB.dossiers.getById(cleanId);
-      if (!dossier) return err('Không tìm thấy hồ sơ', 404);
+  async updateDossier(id, payload) {
+    await this._delay(150);
+    const idx = DB.dossiers.findIndex(d => d.id === id);
+    if (idx === -1) throw new Error('Không tìm thấy hồ sơ');
+    const old = { ...DB.dossiers[idx] };
+    DB.dossiers[idx] = { ...old, ...payload, updated_at: new Date().toISOString() };
 
-      const users    = await DB.users.getAll();
-      const enriched = await enrich(dossier, users);
-      enriched.history  = await DB.workflow.getHistory(dossier.dossierId || cleanId);
-      const rawComments = await DB.comments.getByDossier(dossier.dossierId || cleanId);
-      enriched.comments = rawComments.map(c => ({
-        ...c,
-        actor: users.find(u => u.id === c.userId) || null
-      }));
-      return ok(enriched);
-    },
-
-    async create(data) {
-      const ae = authCheck(); if (ae) return ae;
-      if (!Auth.hasPermission('dossier.create') && !Auth.isAdmin()) return err('Không có quyền tạo hồ sơ', 403);
-
-      const clean = {
-        projectName: Security.XSS.sanitizeInput(data.projectName || ''),
-        contractNo:  Security.XSS.sanitizeInput(data.contractNo  || ''),
-        department:  ['telecom','business','accounting'].includes(data.department) ? data.department : '',
-        priority:    ['urgent','high','medium','low'].includes(data.priority) ? data.priority : 'medium',
-        amount:      Math.min(Math.max(Number(data.amount) || 0, 0), 1e12),
-        deadline:    data.deadline || '',
-        assigneeId:  Security.XSS.sanitizeInput(data.assigneeId || ''),
-        description: Security.XSS.sanitizeInput(data.description || ''),
-        notes:       Security.XSS.sanitizeInput(data.notes || ''),
-        tags:        Array.isArray(data.tags) ? data.tags.map(t => Security.XSS.sanitizeInput(t)).slice(0, 10) : [],
-        creatorId:   Auth.getCurrentUser().id
-      };
-
-      if (!clean.projectName) return err('Tên dự án là bắt buộc');
-      if (!clean.department)  return err('Vui lòng chọn phòng ban');
-
-      const dossier = await DB.dossiers.create(clean);
-      const dossierId = dossier.dossierId || dossier.id;
-
-      // Create initial history
-      await DB.workflow.transition(dossierId, 'created', clean.creatorId, 'Hồ sơ được tạo');
-
-      // Notify assignee
-      if (clean.assigneeId && clean.assigneeId !== clean.creatorId) {
-        DB.notifications.create({
-          userId: clean.assigneeId, type: 'new_assignment',
-          title: 'Hồ sơ mới được giao',
-          message: `${dossierId} - ${clean.projectName} đã được giao cho bạn`,
-          dossierRef: dossierId
+    // Log changed fields
+    Object.keys(payload).forEach(key => {
+      if (old[key] !== payload[key] && key !== 'updated_at') {
+        this._addAuditLog({
+          dossier_id: id,
+          dossier_code: old.dossier_code,
+          action: 'edit',
+          field_changed: key,
+          old_value: String(old[key] || ''),
+          new_value: String(payload[key] || ''),
+          comment: `Cập nhật trường: ${key}`
         });
       }
-      DB.auditLogs.log(clean.creatorId, 'CREATE_DOSSIER', dossierId, 'dossier', { projectName: clean.projectName, amount: clean.amount });
-      DB.invalidateAll();
+    });
 
-      const users = await DB.users.getAll();
-      return ok(await enrich(dossier, users));
-    },
+    return DB.dossiers[idx];
+  },
 
-    async update(id, data) {
-      const ae = authCheck(); if (ae) return ae;
-      const cleanId = Security.XSS.sanitizeInput(id);
-      const dossier = await DB.dossiers.getById(cleanId);
-      if (!dossier) return err('Không tìm thấy hồ sơ', 404);
-      if (!Auth.canEditDossier(dossier) && !Auth.isAdmin()) return err('Không có quyền chỉnh sửa', 403);
+  async changeStatus(id, newStatus, comment='') {
+    await this._delay(200);
+    const idx = DB.dossiers.findIndex(d => d.id === id);
+    if (idx === -1) throw new Error('Không tìm thấy hồ sơ');
+    const dossier = DB.dossiers[idx];
+    const oldStatus = dossier.status;
 
-      const { status, creatorId, id: _id, created_at, ...updateData } = data;
-      const clean = {
-        projectName: Security.XSS.sanitizeInput(updateData.projectName || dossier.projectName),
-        contractNo:  Security.XSS.sanitizeInput(updateData.contractNo  || ''),
-        department:  ['telecom','business','accounting'].includes(updateData.department) ? updateData.department : dossier.department,
-        priority:    ['urgent','high','medium','low'].includes(updateData.priority) ? updateData.priority : dossier.priority,
-        amount:      Math.min(Math.max(Number(updateData.amount) || 0, 0), 1e12),
-        deadline:    updateData.deadline || '',
-        assigneeId:  Security.XSS.sanitizeInput(updateData.assigneeId || ''),
-        description: Security.XSS.sanitizeInput(updateData.description || ''),
-        notes:       Security.XSS.sanitizeInput(updateData.notes || ''),
-        tags:        Array.isArray(updateData.tags) ? updateData.tags.map(t => Security.XSS.sanitizeInput(t)).slice(0, 10) : []
-      };
+    // Validate transition
+    const allowed = WORKFLOW.allowedTransitions(Auth.role, oldStatus);
+    if (!allowed.includes(newStatus)) {
+      throw new Error(`Không được phép chuyển từ "${STATUS_LABELS[oldStatus]}" sang "${STATUS_LABELS[newStatus]}"`);
+    }
 
-      const updated = await DB.dossiers.update(cleanId, clean);
-      DB.auditLogs.log(Auth.getCurrentUser().id, 'UPDATE_DOSSIER', cleanId, 'dossier', { fields: Object.keys(clean) });
-      DB.invalidateAll();
-      const users = await DB.users.getAll();
-      return ok(await enrich({ ...dossier, ...clean }, users));
-    },
+    DB.dossiers[idx].status = newStatus;
+    DB.dossiers[idx].updated_at = new Date().toISOString();
 
-    async delete(id) {
-      const ae = authCheck(); if (ae) return ae;
-      if (!Auth.isAdmin()) return err('Chỉ admin được xóa', 403);
-      const cleanId = Security.XSS.sanitizeInput(id);
-      const dossier = await DB.dossiers.getById(cleanId);
-      if (!dossier) return err('Không tìm thấy hồ sơ', 404);
-      await DB.dossiers.delete(cleanId);
-      DB.auditLogs.log(Auth.getCurrentUser().id, 'DELETE_DOSSIER', cleanId, 'dossier', { projectName: dossier.projectName });
-      DB.invalidateAll();
-      return ok({ deleted: true });
-    },
+    // Audit log
+    this._addAuditLog({
+      dossier_id: id,
+      dossier_code: dossier.dossier_code,
+      action: 'status_change',
+      field_changed: 'status',
+      old_value: oldStatus,
+      new_value: newStatus,
+      comment: comment || `Chuyển trạng thái: ${STATUS_LABELS[oldStatus]} → ${STATUS_LABELS[newStatus]}`
+    });
 
-    async transition(id, newStatus, note) {
-      const ae = authCheck(); if (ae) return ae;
-      const cleanId     = Security.XSS.sanitizeInput(id);
-      const cleanStatus = Security.XSS.sanitizeInput(newStatus);
-      const cleanNote   = Security.XSS.sanitizeInput(note || '');
+    // Notify creator
+    if (dossier.created_by_id !== Auth.userId) {
+      this._addNotification({
+        user_id: dossier.created_by_id,
+        dossier_id: id,
+        dossier_code: dossier.dossier_code,
+        type: 'status_change',
+        title: 'Trạng thái hồ sơ thay đổi',
+        message: `${dossier.dossier_code} đã chuyển sang: ${STATUS_LABELS[newStatus]}`,
+        priority: dossier.priority
+      });
+    }
 
-      const dossier = await DB.dossiers.getById(cleanId);
-      if (!dossier) return err('Không tìm thấy hồ sơ', 404);
-      if (!Auth.canTransitionDossier(dossier, cleanStatus)) return err('Không có quyền thực hiện thao tác này', 403);
-
-      const check = DB.workflow.canTransition(dossier.status, cleanStatus, Auth.getCurrentUser().role);
-      if (!check.ok) return err(check.reason, 400);
-
-      const user   = Auth.getCurrentUser();
-      const dosId  = dossier.dossierId || cleanId;
-      const result = await DB.workflow.transition(dosId, cleanStatus, user.id, cleanNote);
-      if (!result.ok) return err(result.reason);
-
-      DB.auditLogs.log(user.id, 'STATUS_CHANGE', dosId, 'dossier', { from: dossier.status, to: cleanStatus, note: cleanNote });
-
-      // Notify
-      const actors = new Set([dossier.creatorId, dossier.assigneeId].filter(Boolean));
-      actors.delete(user.id);
-      const stepLabel = DB.WORKFLOW_STEPS.find(s => s.id === cleanStatus)?.label || cleanStatus;
-      actors.forEach(uid => {
-        DB.notifications.create({
-          userId: uid, type: 'status_change',
-          title: 'Trạng thái hồ sơ thay đổi',
-          message: `${dosId} - ${dossier.projectName}: → ${stepLabel}`,
-          dossierRef: dosId
+    // Notify assigned user when sent to accounting
+    if (newStatus === 'sent_accounting') {
+      DB.users.filter(u => u.role === 'accounting_staff').forEach(u => {
+        this._addNotification({
+          user_id: u.id,
+          dossier_id: id,
+          dossier_code: dossier.dossier_code,
+          type: 'assignment',
+          title: 'Hồ sơ chờ phê duyệt',
+          message: `${dossier.dossier_code} "${dossier.project_name}" đã được chuyển sang Kế toán.`,
+          priority: 'high'
         });
       });
-
-      DB.invalidateAll();
-      const updatedDossier = await DB.dossiers.getById(cleanId);
-      const users = await DB.users.getAll();
-      return ok({ dossier: await enrich(updatedDossier, users), entry: result.entry });
     }
-  };
 
-  /* ─── Users ─── */
-  const users = {
-    async list() {
-      const ae = authCheck(); if (ae) return ae;
-      if (!Auth.isAdmin()) return err('Chỉ admin được xem danh sách', 403);
-      const list = (await DB.users.getAll()).map(safeUser);
-      return ok(list, { total: list.length });
-    },
+    return DB.dossiers[idx];
+  },
 
-    async getById(id) {
-      const ae = authCheck(); if (ae) return ae;
-      const cleanId = Security.XSS.sanitizeInput(id);
-      if (!Auth.isAdmin() && Auth.getCurrentUser().id !== cleanId) return err('Không có quyền', 403);
-      const user = await DB.users.getById(cleanId);
-      if (!user) return err('Không tìm thấy', 404);
-      return ok(safeUser(user));
-    },
+  async deleteDossier(id) {
+    await this._delay(150);
+    const idx = DB.dossiers.findIndex(d => d.id === id);
+    if (idx === -1) throw new Error('Không tìm thấy hồ sơ');
+    DB.dossiers[idx].is_deleted = true;
+    this._addAuditLog({
+      dossier_id: id,
+      dossier_code: DB.dossiers[idx].dossier_code,
+      action: 'delete',
+      field_changed: 'is_deleted',
+      old_value: 'false',
+      new_value: 'true',
+      comment: 'Xóa hồ sơ'
+    });
+    return true;
+  },
 
-    async create(data) { return Auth.register(data); },
+  /* ---- AUDIT LOGS ---- */
+  async getAuditLogs(dossierId=null) {
+    await this._delay(80);
+    let logs = [...DB.auditLogs];
+    if (dossierId) logs = logs.filter(l => l.dossier_id === dossierId);
+    return logs.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
+  },
 
-    async update(id, data) {
-      const ae = authCheck(); if (ae) return ae;
-      if (!Auth.isAdmin()) return err('Chỉ admin được cập nhật', 403);
-      const cleanId = Security.XSS.sanitizeInput(id);
-      const user = await DB.users.getById(cleanId);
-      if (!user) return err('Không tìm thấy', 404);
-      const clean = {
-        displayName: Security.XSS.sanitizeInput(data.displayName || user.displayName),
-        email:       Security.XSS.sanitizeInput(data.email || user.email || ''),
-        phone:       Security.XSS.sanitizeInput(data.phone || user.phone || ''),
-        role:        ['admin','telecom','business','accounting'].includes(data.role) ? data.role : user.role,
-        department:  data.department || user.department,
-        active:      data.active !== undefined ? Boolean(data.active) : user.active
-      };
-      await DB.users.update(cleanId, clean);
-      DB.auditLogs.log(Auth.getCurrentUser().id, 'UPDATE_USER', cleanId, 'user', { fields: Object.keys(clean) });
-      DB.invalidateAll();
-      const updated = await DB.users.getById(cleanId);
-      return ok(safeUser(updated));
-    },
+  /* ---- COMMENTS ---- */
+  async getComments(dossierId) {
+    await this._delay(60);
+    return DB.comments.filter(c => c.dossier_id === dossierId && !c.is_deleted)
+      .sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
+  },
 
-    async delete(id) {
-      const ae = authCheck(); if (ae) return ae;
-      if (!Auth.isAdmin()) return err('Chỉ admin được xóa', 403);
-      const cleanId = Security.XSS.sanitizeInput(id);
-      if (cleanId === Auth.getCurrentUser().id) return err('Không thể xóa tài khoản đang đăng nhập', 400);
-      await DB.users.delete(cleanId);
-      DB.auditLogs.log(Auth.getCurrentUser().id, 'DELETE_USER', cleanId, 'user', {});
-      DB.invalidateAll();
-      return ok({ deleted: true });
+  async addComment(dossierId, content, isInternal=false) {
+    await this._delay(150);
+    const dossier = DB.dossiers.find(d => d.id === dossierId);
+    const comment = {
+      id: DB.newId(),
+      dossier_id: dossierId,
+      user_id: Auth.userId,
+      user_name: Auth.user.full_name,
+      user_role: Auth.role,
+      content,
+      is_internal: isInternal,
+      is_deleted: false,
+      created_at: new Date().toISOString()
+    };
+    DB.comments.push(comment);
+
+    this._addAuditLog({
+      dossier_id: dossierId,
+      dossier_code: dossier?.dossier_code || '',
+      action: 'comment',
+      field_changed: 'comments',
+      old_value: '',
+      new_value: Utils.truncate(content, 50),
+      comment: content
+    });
+
+    return comment;
+  },
+
+  /* ---- NOTIFICATIONS ---- */
+  async getNotifications(userId=null) {
+    await this._delay(60);
+    const uid = userId || Auth.userId;
+    return DB.notifications
+      .filter(n => n.user_id === uid || Auth.isAdmin)
+      .sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
+  },
+
+  async markNotificationRead(id) {
+    const n = DB.notifications.find(n => n.id === id);
+    if (n) n.is_read = true;
+  },
+
+  async markAllRead() {
+    DB.notifications.filter(n => n.user_id === Auth.userId).forEach(n => n.is_read = true);
+  },
+
+  getUnreadCount() {
+    return DB.notifications.filter(n => n.user_id === Auth.userId && !n.is_read).length;
+  },
+
+  /* ---- USERS ---- */
+  async getUsers() {
+    await this._delay(80);
+    return DB.users.map(u => ({ ...u, password: undefined }));
+  },
+
+  async createUser(payload) {
+    await this._delay(200);
+    if (DB.users.find(u => u.username === payload.username)) {
+      throw new Error('Tên đăng nhập đã tồn tại');
     }
-  };
+    const id = DB.newId();
+    const user = {
+      id, ...payload,
+      avatar: Utils.getInitials(payload.full_name),
+      is_active: true,
+      created_at: new Date().toISOString()
+    };
+    DB.users.push(user);
+    return { ...user, password: undefined };
+  },
 
-  /* ─── Comments ─── */
-  const comments = {
-    async add(dossierId, text) {
-      const ae = authCheck(); if (ae) return ae;
-      const cleanId   = Security.XSS.sanitizeInput(dossierId);
-      const cleanText = Security.XSS.sanitizeInput(text);
-      if (!cleanText) return err('Nội dung không được rỗng');
-      if (cleanText.length > 1000) return err('Bình luận quá dài');
+  async updateUser(id, payload) {
+    await this._delay(150);
+    const idx = DB.users.findIndex(u => u.id === id);
+    if (idx === -1) throw new Error('Không tìm thấy người dùng');
+    DB.users[idx] = { ...DB.users[idx], ...payload };
+    return { ...DB.users[idx], password: undefined };
+  },
 
-      const dossier = await DB.dossiers.getById(cleanId);
-      if (!dossier) return err('Không tìm thấy hồ sơ', 404);
+  async deleteUser(id) {
+    await this._delay(150);
+    const idx = DB.users.findIndex(u => u.id === id);
+    if (idx === -1) throw new Error('Không tìm thấy người dùng');
+    if (id === Auth.userId) throw new Error('Không thể xóa tài khoản đang đăng nhập');
+    DB.users[idx].is_active = false;
+    return true;
+  },
 
-      const user    = Auth.getCurrentUser();
-      const comment = await DB.comments.add(dossier.dossierId || cleanId, user.id, cleanText);
-      DB.auditLogs.log(user.id, 'ADD_COMMENT', cleanId, 'dossier', { commentId: comment.id });
-      return ok(comment);
-    },
+  /* ---- DASHBOARD STATS ---- */
+  async getDashboardStats() {
+    await this._delay(100);
+    const allDossiers = DB.dossiers.filter(d => !d.is_deleted);
+    const now = new Date();
 
-    async delete(commentApiId) {
-      const ae = authCheck(); if (ae) return ae;
-      await DB.comments.delete(commentApiId);
-      return ok({ deleted: true });
-    }
-  };
+    const byStatus = {};
+    WORKFLOW.steps.forEach(s => { byStatus[s.key] = 0; });
+    allDossiers.forEach(d => { if (byStatus[d.status] !== undefined) byStatus[d.status]++; });
 
-  /* ─── Notifications ─── */
-  const notifications = {
-    async list() {
-      const ae = authCheck(); if (ae) return ae;
-      const user  = Auth.getCurrentUser();
-      const list  = await DB.notifications.getByUser(user.id);
-      const unread = list.filter(n => !n.read).length;
-      return ok(list, { unread });
-    },
-    async markRead(id) {
-      const ae = authCheck(); if (ae) return ae;
-      await DB.notifications.markRead(Security.XSS.sanitizeInput(id));
-      return ok({ marked: true });
-    },
-    async markAllRead() {
-      const ae = authCheck(); if (ae) return ae;
-      await DB.notifications.markAllRead(Auth.getCurrentUser().id);
-      return ok({ marked: true });
-    }
-  };
+    const overdue = allDossiers.filter(d =>
+      d.deadline && new Date(d.deadline) < now &&
+      !['paid','archived'].includes(d.status)
+    );
 
-  /* ─── Stats ─── */
-  const stats = {
-    async dashboard() {
-      const ae = authCheck(); if (ae) return ae;
-      const [byStatus, byDept, totalAmt, overdue, allDossiers] = await Promise.all([
-        DB.stats.byStatus(), DB.stats.byDepartment(),
-        DB.stats.totalAmount(), DB.stats.overdue(),
-        DB.dossiers.getAll()
-      ]);
-      const total     = allDossiers.length;
-      const completed = (byStatus.paid || 0) + (byStatus.archived || 0);
-      const rate      = total > 0 ? Math.round(completed / total * 100) : 0;
-      return ok({ byStatus, byDept, total, overdue: overdue.length, totalAmount: totalAmt, completionRate: rate });
-    }
-  };
+    const totalAmount = allDossiers.reduce((s,d) => s + (d.amount||0), 0);
+    const paidAmount = allDossiers.filter(d=>d.status==='paid').reduce((s,d)=>s+(d.amount||0),0);
 
-  return { dossiers, users, comments, notifications, stats };
-})();
+    const byDept = {};
+    allDossiers.forEach(d => {
+      byDept[d.department] = (byDept[d.department]||0)+1;
+    });
 
-window.API = API;
+    const byPriority = { high:0, medium:0, low:0 };
+    allDossiers.forEach(d => { byPriority[d.priority]++; });
+
+    const recentActivity = DB.auditLogs
+      .sort((a,b) => new Date(b.timestamp)-new Date(a.timestamp))
+      .slice(0,8);
+
+    return {
+      total: allDossiers.length,
+      byStatus,
+      overdue: overdue.length,
+      overdueList: overdue.slice(0,5),
+      totalAmount,
+      paidAmount,
+      byDept,
+      byPriority,
+      recentActivity,
+      users: DB.users.filter(u=>u.is_active).length
+    };
+  },
+
+  /* ---- PRIVATE ---- */
+  _addAuditLog(data) {
+    DB.auditLogs.push({
+      id: DB.newId(),
+      user_id: Auth.userId,
+      user_name: Auth.user?.full_name || 'System',
+      user_role: Auth.role,
+      ip_address: '127.0.0.1',
+      timestamp: new Date().toISOString(),
+      ...data
+    });
+  },
+
+  _addNotification(data) {
+    DB.notifications.push({
+      id: DB.newId(),
+      is_read: false,
+      created_at: new Date().toISOString(),
+      ...data
+    });
+  },
+
+  _delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+};

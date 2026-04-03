@@ -1,174 +1,188 @@
-/**
- * settings.js - Cài đặt hệ thống (async/await, Table API)
- * PayTrack Pro v3.0
- */
+/* ===========================
+   Settings Page
+   =========================== */
 
-const PageSettings = (() => {
-  'use strict';
-  const e = Security.e;
-
-  /* ─── Render chính (async) ─── */
-  async function render() {
-    document.getElementById('mainContent').innerHTML =
-      `<div class="page-loader"><i class="fas fa-spinner fa-spin"></i> Đang tải...</div>`;
-
-    const user = Auth.getCurrentUser();
-
-    // Stats (admin only)
-    let dossierCount = '—', userCount = '—', auditCount = '—';
-    if (Auth.isAdmin()) {
-      const [dos, usrs, auds] = await Promise.all([
-        DB.dossiers.getAll(),
-        DB.users.getAll(),
-        DB.auditLogs.getAll(9999)
-      ]);
-      dossierCount = String(dos.length);
-      userCount    = String(usrs.length);
-      auditCount   = String(auds.length);
-    }
-
-    const html = `
-<div class="settings-page">
-  <div class="page-header">
-    <h1 class="page-title"><i class="fas fa-cog me-2"></i>Cài đặt Hệ thống</h1>
-  </div>
-
-  <!-- Profile Section -->
-  <div class="card mb-4">
-    <div class="card-header"><h3><i class="fas fa-user me-2"></i>Thông tin cá nhân</h3></div>
-    <div class="card-body">
-      <div class="profile-section">
-        <div class="avatar-large" style="background:${e(user.color || '#6c757d')}">
-          ${e(user.avatar || '?')}
-        </div>
-        <div class="profile-info">
-          <h2>${e(user.displayName)}</h2>
-          <p class="text-muted">@${e(user.username)} · ${e(Auth.getRoleLabel(user.role))} · ${e(Auth.getDeptLabel(user.department))}</p>
-          <p class="text-muted small">${e(user.email || 'Chưa có email')}</p>
-        </div>
+window.SettingsPage = {
+  render() {
+    const u = Auth.user;
+    document.getElementById('pageContainer').innerHTML = `
+      <div class="page-header">
+        <div class="page-title"><i class="fas fa-cog" style="color:var(--primary)"></i> Cài đặt Hệ thống</div>
       </div>
-    </div>
-  </div>
 
-  <!-- Change Password -->
-  <div class="card mb-4">
-    <div class="card-header"><h3><i class="fas fa-key me-2"></i>Đổi mật khẩu</h3></div>
-    <div class="card-body">
-      <div class="form-grid" style="max-width:500px">
-        <div class="form-group full-width">
-          <label>Mật khẩu hiện tại</label>
-          <input type="password" id="oldPassword" class="form-input"
-            placeholder="Nhập mật khẩu hiện tại" autocomplete="current-password">
-        </div>
-        <div class="form-group">
-          <label>Mật khẩu mới</label>
-          <input type="password" id="newPassword" class="form-input"
-            placeholder="Tối thiểu 6 ký tự" autocomplete="new-password">
-          <div id="pwdStrength" class="pwd-strength mt-1"></div>
-        </div>
-        <div class="form-group">
-          <label>Xác nhận mật khẩu mới</label>
-          <input type="password" id="confirmPassword" class="form-input"
-            placeholder="Nhập lại mật khẩu mới" autocomplete="new-password">
-        </div>
-        <div class="form-group full-width">
-          <button id="changePwdBtn" class="btn btn-primary" onclick="PageSettings.changePassword()">
-            <i class="fas fa-save me-1"></i>Cập nhật mật khẩu
-          </button>
-        </div>
-      </div>
-    </div>
-  </div>
+      <div style="max-width:800px;display:flex;flex-direction:column;gap:24px">
 
-  ${Auth.isAdmin() ? `
-  <!-- System Info (Admin only) -->
-  <div class="card mb-4">
-    <div class="card-header"><h3><i class="fas fa-info-circle me-2"></i>Thông tin hệ thống</h3></div>
-    <div class="card-body">
-      <table class="table table-sm">
-        <tbody>
-          <tr><td>Phiên bản</td><td>PayTrack Pro v3.0</td></tr>
-          <tr><td>Security Module</td><td>v${e(Security.VERSION || '2.0.0')}</td></tr>
-          <tr><td>Lưu trữ</td><td>RESTful Table API (server-side, persistent)</td></tr>
-          <tr><td>Tổng hồ sơ</td><td>${e(dossierCount)}</td></tr>
-          <tr><td>Tổng người dùng</td><td>${e(userCount)}</td></tr>
-          <tr><td>Audit logs</td><td>${e(auditCount)}</td></tr>
-          <tr><td>Bảo mật</td><td>SHA-256, Rate Limiting, Session Timeout, XSS Protection, CSP</td></tr>
-        </tbody>
-      </table>
-    </div>
-  </div>` : ''}
-
-  <!-- Session Info -->
-  <div class="card">
-    <div class="card-header"><h3><i class="fas fa-shield-alt me-2"></i>Phiên làm việc hiện tại</h3></div>
-    <div class="card-body">
-      <table class="table table-sm">
-        <tbody>
-          <tr><td>Đăng nhập lúc</td><td>${e(Utils.fmt.datetime(user.loginAt))}</td></tr>
-          <tr><td>Session timeout</td><td>30 phút không hoạt động</td></tr>
-          <tr><td>CSRF Token</td><td><code class="mono">${e(Security.CSRF.get().substring(0, 16))}...</code></td></tr>
-        </tbody>
-      </table>
-      <button class="btn btn-danger mt-2"
-        onclick="if(confirm('Đăng xuất?')){Auth.logout();App.showLogin();}">
-        <i class="fas fa-sign-out-alt me-1"></i>Đăng xuất ngay
-      </button>
-    </div>
-  </div>
-</div>`;
-
-    document.getElementById('mainContent').innerHTML = html;
-
-    // Password strength indicator
-    const newPwd = document.getElementById('newPassword');
-    if (newPwd) {
-      newPwd.addEventListener('input', () => {
-        const strength = Security.Password.checkStrength(newPwd.value);
-        const el = document.getElementById('pwdStrength');
-        if (!el) return;
-        const colors = ['', '#dc3545', '#fd7e14', '#ffc107', '#28a745', '#20c997'];
-        el.innerHTML = newPwd.value ? `
-          <div class="strength-bar">
-            <div style="width:${(strength.score / 5 * 100)}%;background:${colors[strength.score]};height:4px;border-radius:2px;transition:all 0.3s"></div>
+        <!-- PROFILE -->
+        <div class="card">
+          <div class="settings-section" style="margin-bottom:0">
+            <h3><i class="fas fa-user-circle" style="color:var(--primary)"></i> Hồ sơ cá nhân</h3>
+            <div style="display:flex;align-items:center;gap:20px;margin-bottom:24px">
+              ${Utils.avatarHtml(u.full_name, 64, 22)}
+              <div>
+                <div style="font-size:18px;font-weight:700">${u.full_name}</div>
+                <div style="color:var(--text-muted)">${u.email}</div>
+                <div style="margin-top:6px">${Utils.roleBadge(u.role)}</div>
+              </div>
+            </div>
+            <div class="settings-grid">
+              <div class="form-group">
+                <label>Họ và tên</label>
+                <input type="text" id="profileName" value="${u.full_name}" />
+              </div>
+              <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="profileEmail" value="${u.email}" />
+              </div>
+              <div class="form-group">
+                <label>Tên đăng nhập</label>
+                <input type="text" value="${u.username}" readonly style="opacity:.6" />
+              </div>
+              <div class="form-group">
+                <label>Phòng ban</label>
+                <input type="text" value="${Utils.deptLabel(u.department)}" readonly style="opacity:.6" />
+              </div>
+            </div>
+            <div class="form-group" style="max-width:300px">
+              <label>Mật khẩu mới (để trống = không đổi)</label>
+              <div class="password-wrapper">
+                <input type="password" id="newPwd" placeholder="Nhập mật khẩu mới..." />
+                <button type="button" class="toggle-pwd" onclick="togglePwd('newPwd')"><i class="fas fa-eye"></i></button>
+              </div>
+            </div>
+            <button class="btn btn-primary" onclick="SettingsPage.saveProfile()"><i class="fas fa-save"></i> Lưu thay đổi</button>
           </div>
-          <span style="color:${colors[strength.score]};font-size:12px">${Security.e(strength.level)}</span>
-        ` : '';
-      });
+        </div>
+
+        <!-- SYSTEM INFO -->
+        <div class="card">
+          <div class="settings-section" style="margin-bottom:0">
+            <h3><i class="fas fa-server" style="color:var(--info)"></i> Thông tin Hệ thống</h3>
+            <div class="settings-grid">
+              ${this._infoRow('Phiên bản','PayTrack Pro v1.0.0')}
+              ${this._infoRow('Tổng hồ sơ', DB.dossiers.filter(d=>!d.is_deleted).length + ' hồ sơ')}
+              ${this._infoRow('Người dùng', DB.users.filter(u=>u.is_active).length + ' tài khoản')}
+              ${this._infoRow('Audit Logs', DB.auditLogs.length + ' bản ghi')}
+              ${this._infoRow('Thông báo', DB.notifications.length + ' thông báo')}
+              ${this._infoRow('Môi trường','Production (Simulated)')}
+            </div>
+          </div>
+        </div>
+
+        <!-- DATABASE SCHEMA (Admin only) -->
+        ${Auth.isAdmin ? `
+        <div class="card">
+          <div class="settings-section" style="margin-bottom:0">
+            <h3><i class="fas fa-database" style="color:var(--success)"></i> Cấu trúc Cơ sở dữ liệu</h3>
+            ${this._renderSchema()}
+          </div>
+        </div>` : ''}
+
+        <!-- WORKFLOW CONFIG -->
+        <div class="card">
+          <div class="settings-section" style="margin-bottom:0">
+            <h3><i class="fas fa-stream" style="color:var(--warning)"></i> Luồng xử lý Workflow</h3>
+            <div class="table-wrapper schema-table">
+              <table>
+                <thead><tr><th>BƯỚC</th><th>TRẠNG THÁI</th><th>MÔ TẢ</th><th>NGƯỜI XỬ LÝ</th></tr></thead>
+                <tbody>
+                  ${WORKFLOW.steps.map((s,i)=>`
+                    <tr>
+                      <td style="font-weight:700">${i+1}</td>
+                      <td>${Utils.statusBadge(s.key)}</td>
+                      <td>${s.label}</td>
+                      <td style="font-size:11px;color:var(--text-muted)">${this._stepOwner(s.key)}</td>
+                    </tr>`).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- DANGER ZONE (Admin) -->
+        ${Auth.isAdmin ? `
+        <div class="card" style="border-color:var(--danger)">
+          <div class="settings-section" style="margin-bottom:0">
+            <h3 style="color:var(--danger)"><i class="fas fa-exclamation-triangle"></i> Vùng nguy hiểm</h3>
+            <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px">Các hành động không thể hoàn tác.</p>
+            <div style="display:flex;gap:10px;flex-wrap:wrap">
+              <button class="btn btn-danger" onclick="SettingsPage.resetDemo()"><i class="fas fa-redo"></i> Reset dữ liệu demo</button>
+              <button class="btn btn-secondary" onclick="SettingsPage.exportBackup()"><i class="fas fa-download"></i> Backup toàn bộ data</button>
+            </div>
+          </div>
+        </div>` : ''}
+      </div>
+    `;
+  },
+
+  _infoRow(label, value) {
+    return `<div><div class="df-label">${label}</div><div class="df-value">${value}</div></div>`;
+  },
+
+  _renderSchema() {
+    const tables = [
+      { name:'users', fields:['id','username','full_name','email','role','department','is_active'] },
+      { name:'dossiers', fields:['id','dossier_code','project_name','status','priority','amount','deadline','department','assigned_to_id'] },
+      { name:'audit_logs', fields:['id','dossier_id','user_id','action','old_value','new_value','timestamp'] },
+      { name:'notifications', fields:['id','user_id','type','title','is_read','priority'] },
+      { name:'comments', fields:['id','dossier_id','user_id','content','is_internal'] },
+    ];
+    return tables.map(t=>`
+      <div style="margin-bottom:16px">
+        <div style="font-weight:700;font-size:12px;color:var(--primary);margin-bottom:8px"><i class="fas fa-table"></i> ${t.name}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          ${t.fields.map(f=>`<code style="background:var(--surface-2);padding:3px 8px;border-radius:4px;font-size:11px;border:1px solid var(--border)">${f}</code>`).join('')}
+        </div>
+      </div>`).join('');
+  },
+
+  _stepOwner(status) {
+    const owners = {
+      created: 'Kinh doanh / Viễn thông',
+      submitted: 'Kinh doanh / Viễn thông',
+      verified: 'Phòng Viễn thông',
+      sent_accounting: 'Phòng Kế toán',
+      approved: 'Phòng Kế toán',
+      paid: 'Phòng Kế toán',
+      archived: 'Admin / Kế toán',
+    };
+    return owners[status] || '—';
+  },
+
+  saveProfile() {
+    const name = document.getElementById('profileName').value.trim();
+    const email = document.getElementById('profileEmail').value.trim();
+    const pwd = document.getElementById('newPwd').value;
+    if (!name || !email) return Toast.show('Lỗi','Vui lòng điền đầy đủ!','error');
+    const idx = DB.users.findIndex(u=>u.id===Auth.userId);
+    if (idx > -1) {
+      DB.users[idx].full_name = name;
+      DB.users[idx].email = email;
+      if (pwd) DB.users[idx].password = pwd;
+      Auth.currentUser.full_name = name;
+      Auth.currentUser.email = email;
+      localStorage.setItem(Auth.SESSION_KEY, JSON.stringify(Auth.currentUser));
+      Toast.show('Thành công','Đã cập nhật hồ sơ cá nhân!','success');
+      updateUserUI();
     }
+  },
+
+  resetDemo() {
+    document.getElementById('confirmTitle').textContent = 'Reset dữ liệu?';
+    document.getElementById('confirmMessage').textContent = 'Tất cả dữ liệu sẽ được đặt lại về trạng thái demo ban đầu. Bạn xác nhận?';
+    document.getElementById('confirmOkBtn').onclick = () => {
+      closeModal('modalConfirm');
+      location.reload();
+    };
+    openModal('modalConfirm');
+  },
+
+  exportBackup() {
+    const backup = JSON.stringify({ users: DB.users, dossiers: DB.dossiers, auditLogs: DB.auditLogs, notifications: DB.notifications, comments: DB.comments, exportedAt: new Date().toISOString() }, null, 2);
+    const blob = new Blob([backup], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href=url; a.download=`PayTrack_Backup_${Date.now()}.json`; a.click();
+    URL.revokeObjectURL(url);
+    Toast.show('Thành công','Đã xuất backup!','success');
   }
-
-  /* ─── Đổi mật khẩu (async) ─── */
-  async function changePassword() {
-    const oldPwd  = document.getElementById('oldPassword')?.value;
-    const newPwd  = document.getElementById('newPassword')?.value;
-    const confirm = document.getElementById('confirmPassword')?.value;
-    const btn     = document.getElementById('changePwdBtn');
-
-    if (!oldPwd || !newPwd || !confirm) {
-      Utils.showToast('Vui lòng điền đầy đủ thông tin', 'warning');
-      return;
-    }
-    if (newPwd !== confirm) {
-      Utils.showToast('Mật khẩu xác nhận không khớp', 'error');
-      return;
-    }
-
-    Utils.dom.setLoading(btn, true, 'Đang cập nhật...');
-    const result = await Auth.changePassword(oldPwd, newPwd);
-    Utils.dom.setLoading(btn, false);
-
-    if (result.ok) {
-      Utils.showToast('Đã cập nhật mật khẩu thành công!', 'success');
-      document.getElementById('oldPassword').value     = '';
-      document.getElementById('newPassword').value     = '';
-      document.getElementById('confirmPassword').value = '';
-    } else {
-      Utils.showToast(result.reason || 'Lỗi đổi mật khẩu', 'error');
-    }
-  }
-
-  return { render, changePassword };
-})();
-
-window.PageSettings = PageSettings;
+};

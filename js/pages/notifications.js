@@ -1,99 +1,70 @@
-/**
- * notifications.js - Trang thông báo (async/await, Table API)
- * PayTrack Pro v3.0
- */
+/* ===========================
+   Notifications Page
+   =========================== */
 
-const PageNotifications = (() => {
-  'use strict';
-  const e = Security.e;
+window.NotificationsPage = {
+  async render() {
+    document.getElementById('pageContainer').innerHTML = `<div class="loading"><div class="spinner"></div></div>`;
+    const notifs = await API.getNotifications();
+    this._render(notifs);
+  },
 
-  const TYPE_ICONS = {
-    new_assignment:    { icon: 'fa-user-tag',     color: '#007bff' },
-    status_change:     { icon: 'fa-exchange-alt', color: '#17a2b8' },
-    deadline_alert:    { icon: 'fa-clock',        color: '#dc3545' },
-    approval_required: { icon: 'fa-thumbs-up',    color: '#28a745' },
-    system:            { icon: 'fa-cog',          color: '#6c757d' }
-  };
+  _render(notifs) {
+    const unread = notifs.filter(n=>!n.is_read).length;
+    const typeIcons = {
+      assignment: { icon:'fa-user-tag', cls:'ni-assignment' },
+      status_change: { icon:'fa-exchange-alt', cls:'ni-status_change' },
+      deadline: { icon:'fa-clock', cls:'ni-deadline' },
+      comment: { icon:'fa-comment', cls:'ni-comment' },
+      approval: { icon:'fa-check-double', cls:'ni-approval' },
+    };
 
-  /* ─── Render chính (async) ─── */
-  async function render() {
-    document.getElementById('mainContent').innerHTML =
-      `<div class="page-loader"><i class="fas fa-spinner fa-spin"></i> Đang tải...</div>`;
+    document.getElementById('pageContainer').innerHTML = `
+      <div class="page-header">
+        <div>
+          <div class="page-title"><i class="fas fa-bell" style="color:var(--primary)"></i> Thông báo</div>
+          <div class="page-subtitle">${unread} thông báo chưa đọc</div>
+        </div>
+        <div class="page-actions">
+          ${unread ? `<button class="btn btn-secondary" onclick="NotificationsPage.markAllRead()"><i class="fas fa-check-double"></i> Đánh dấu tất cả đã đọc</button>` : ''}
+        </div>
+      </div>
 
-    const result = await API.notifications.list();
-    if (!result.success) { Utils.showToast('Lỗi tải thông báo', 'error'); return; }
-
-    const notifs = result.data;
-    const unread = result.unread;
-
-    const html = `
-<div class="notifications-page">
-  <div class="page-header">
-    <h1 class="page-title"><i class="fas fa-bell me-2"></i>Thông báo
-      ${unread > 0
-        ? `<span class="badge badge-danger ms-2">${e(String(unread))} chưa đọc</span>`
-        : ''}
-    </h1>
-    ${unread > 0 ? `
-    <button class="btn btn-outline" onclick="PageNotifications.markAll()">
-      <i class="fas fa-check-double me-1"></i>Đánh dấu tất cả đã đọc
-    </button>` : ''}
-  </div>
-
-  <div class="card">
-    ${!notifs.length
-      ? `<div class="empty-state"><i class="fas fa-bell-slash"></i><p>Không có thông báo nào</p></div>`
-      : `<div class="notification-list">
-          ${notifs.map(n => {
-            const meta = TYPE_ICONS[n.type] || TYPE_ICONS.system;
-            const ts   = n.ts || n.created_at || '';
-            return `
-              <div class="notif-item ${!n.read ? 'unread' : ''}"
-                onclick="PageNotifications.open('${e(n.id)}', '${e(n.dossierRef || '')}')">
-                <div class="notif-icon" style="background:${e(meta.color)}20;color:${e(meta.color)}">
-                  <i class="fas ${e(meta.icon)}"></i>
+      <div class="notif-list">
+        ${notifs.length ? notifs.map(n=>{
+          const ti = typeIcons[n.type] || { icon:'fa-bell', cls:'ni-assignment' };
+          return `
+            <div class="notif-item ${n.is_read?'':'unread'}" onclick="NotificationsPage.clickNotif('${n.id}','${n.dossier_id}')">
+              <div class="notif-icon ${ti.cls}"><i class="fas ${ti.icon}"></i></div>
+              <div class="notif-content">
+                <div class="notif-title">${n.title}</div>
+                <div class="notif-msg">${n.message}</div>
+                <div class="notif-time">
+                  ${n.dossier_code?`<a class="td-code" href="#" onclick="event.stopPropagation();openDossierDetail('${n.dossier_id}')" style="font-size:11px">${n.dossier_code}</a> · `:''} 
+                  ${Utils.timeAgo(n.created_at)} · 
+                  <span class="badge badge-${n.priority}" style="font-size:9px">${PRIORITY_LABELS[n.priority]}</span>
                 </div>
-                <div class="notif-body">
-                  <div class="notif-title">${e(n.title || '')}</div>
-                  <div class="notif-msg">${e(n.message || '')}</div>
-                  <div class="notif-time text-muted small">${e(Utils.fmt.timeAgo(ts))}</div>
-                </div>
-                ${!n.read ? '<div class="notif-dot"></div>' : ''}
-              </div>`;
-          }).join('')}
-         </div>`}
-  </div>
-</div>`;
+              </div>
+              ${!n.is_read ? '<div class="notif-badge"></div>' : ''}
+            </div>`;
+        }).join('') : `<div class="empty-state"><i class="fas fa-bell-slash"></i><h3>Không có thông báo</h3><p>Bạn đã đọc hết thông báo!</p></div>`}
+      </div>
+    `;
+  },
 
-    document.getElementById('mainContent').innerHTML = html;
-    App.loadNotificationBadge();
+  async clickNotif(id, dossierId) {
+    await API.markNotificationRead(id);
+    updateNotifBadge();
+    if (dossierId) openDossierDetail(dossierId);
+    const notifs = await API.getNotifications();
+    this._render(notifs);
+  },
+
+  async markAllRead() {
+    await API.markAllRead();
+    updateNotifBadge();
+    Toast.show('Thành công','Đã đánh dấu tất cả đã đọc','success');
+    const notifs = await API.getNotifications();
+    this._render(notifs);
   }
-
-  /* ─── Mở / đánh dấu đã đọc (async) ─── */
-  async function open(notifId, dossierRef) {
-    await API.notifications.markRead(notifId);
-
-    // Cập nhật UI ngay lập tức
-    const item = document.querySelector(`.notif-item[onclick*="${CSS.escape(notifId)}"]`);
-    if (item) {
-      item.classList.remove('unread');
-      item.querySelector('.notif-dot')?.remove();
-    }
-    App.loadNotificationBadge();
-
-    if (dossierRef) {
-      App.navigate('dossiers');
-      setTimeout(() => PageDossiers.openDetail(dossierRef), 150);
-    }
-  }
-
-  /* ─── Đánh dấu tất cả đã đọc (async) ─── */
-  async function markAll() {
-    await API.notifications.markAllRead();
-    await render();
-  }
-
-  return { render, open, markAll };
-})();
-
-window.PageNotifications = PageNotifications;
+};
