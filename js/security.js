@@ -523,25 +523,6 @@ const Security = (() => {
     }
   };
 
-  /* ─── Anti-Devtools (light) ─── */
-  const AntiDebug = {
-    _warned: false,
-    init() {
-      // Chỉ log cảnh báo nhẹ, không block devtools hoàn toàn
-      const threshold = 160;
-      const check = () => {
-        if (window.outerWidth - window.innerWidth > threshold ||
-            window.outerHeight - window.innerHeight > threshold) {
-          if (!this._warned) {
-            this._warned = true;
-            SecurityMonitor.logEvent('DEVTOOLS_OPENED', {});
-          }
-        }
-      };
-      setInterval(check, 3000);
-    }
-  };
-
   /* ─── Public API ─── */
   return {
     VERSION: SEC_VERSION,
@@ -561,7 +542,6 @@ const Security = (() => {
       ClickjackingProtection.init();
       CSP.init();
       PolicyHeaders.init();
-      AntiDebug.init();
       CSRF.generate();
       SecurityMonitor.logEvent('SECURITY_INIT', { version: SEC_VERSION });
       console.info(`[PayTrack Security] v${SEC_VERSION} initialized ✓`);

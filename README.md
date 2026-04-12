@@ -51,14 +51,18 @@
 | `tables/pt_audit` | API audit log |
 | `tables/pt_comments` | API bình luận |
 
-## 👤 Tài khoản Demo
+## 👤 Tài khoản hệ thống
 
-| Username | Password | Vai trò |
-|----------|----------|---------|
-| `admin` | `admin123` | Quản trị viên (full access) |
-| `vt_tuan` | `123456` | Nhân viên Viễn thông |
-| `kd_minh` | `123456` | Nhân viên Kinh doanh |
-| `kt_hung` | `123456` | Nhân viên Kế toán |
+| Username | Họ tên | Vai trò | Phòng ban |
+|----------|--------|---------|-----------|
+| `admin` | Quản trị viên | admin | Ban Quản trị |
+| `phongnx` | Ninh Xuân Phong | telecom | Phòng Viễn thông |
+| `ductt` | Trần Tuấn Đức | telecom | Phòng Viễn thông |
+| `datnt` | Nguyễn Tiến Đạt | telecom | Phòng Viễn thông |
+| `quyetph` | Phạm Hoàng Quyết | accounting | Phòng Kế toán |
+| `hanhn` | Hồ Ngọc Hân | accounting | Phòng Kế toán |
+
+> Tài khoản được tạo qua trang **Quản lý Người dùng** (admin) hoặc seed vào bảng `pt_users` với `passwordHash: "__plain__<mật_khẩu>"`.
 
 ## 🗂️ Cấu trúc File
 

@@ -111,7 +111,7 @@ const PageSettings = (() => {
         </tbody>
       </table>
       <button class="btn btn-danger mt-2"
-        onclick="if(confirm('Đăng xuất?')){Auth.logout();App.showLogin();}">
+        onclick="Utils.Modal.confirm('Bạn có chắc muốn đăng xuất?', () => Auth.logout())">
         <i class="fas fa-sign-out-alt me-1"></i>Đăng xuất ngay
       </button>
     </div>

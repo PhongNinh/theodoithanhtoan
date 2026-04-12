@@ -59,9 +59,6 @@ const Auth = (() => {
 
     const passwordHash = await Security.Password.hash(cleanPass);
 
-    // Ensure passwords are hashed on first run
-    await DB._ensurePasswords();
-
     const user = await DB.users.getByUsername(cleanUser);
     if (!user || user.active === false) {
       const rec = Security.RateLimiter.record(limitKey);

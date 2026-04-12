@@ -17,7 +17,7 @@ const App = (() => {
     notifications: { title: 'Thông báo',          fn: () => PageNotifications.render() },
     reports:       { title: 'Báo cáo & Xuất',     fn: () => PageReports.render() },
     users:         { title: 'Quản lý Người dùng', fn: () => PageUsers.render(), adminOnly: true },
-    settings:      { title: 'Cài đặt Hệ thống',  fn: () => PageSettings.render(), adminOnly: true },
+    settings:      { title: 'Cài đặt & Mật khẩu', fn: () => PageSettings.render() },
     security:      { title: 'Bảo mật',            fn: () => PageSecurity.render(), adminOnly: true }
   };
 
@@ -25,21 +25,17 @@ const App = (() => {
   async function init() {
     if (window.Security) Security.init();
 
-    // Show loading while checking session
-    document.getElementById('loginPage')?.classList.add('hidden');
-    document.getElementById('appPage')?.classList.add('hidden');
-    showLoading(true);
+    // Đảm bảo mật khẩu __plain__ được hash trước khi ai đăng nhập
+    try { await DB._ensurePasswords(); } catch (_) {}
 
     try {
       const loggedIn = await Auth.init();
-      showLoading(false);
       if (loggedIn) {
         showApp();
       } else {
         showLogin();
       }
     } catch (e) {
-      showLoading(false);
       showLogin();
       console.error('[App] Init error:', e);
     }
@@ -48,11 +44,6 @@ const App = (() => {
     setupSearch();
     startDeadlineChecker();
     console.info('[App] PayTrack Pro v3.0 initialized');
-  }
-
-  function showLoading(show) {
-    const el = document.getElementById('appLoading');
-    if (el) el.style.display = show ? 'flex' : 'none';
   }
 
   /* ─── Auth UI ─── */
@@ -67,7 +58,7 @@ const App = (() => {
     document.getElementById('appPage')?.classList.remove('hidden');
     const user = Auth.getCurrentUser();
     updateUserInfo(user);
-    updateSidebarPermissions(user);
+    updateSidebarPermissions();
     loadNotificationBadge();
     navigate('dashboard');
   }
@@ -84,7 +75,7 @@ const App = (() => {
     if (Auth.isAdmin()) document.body.classList.add('is-admin');
   }
 
-  function updateSidebarPermissions(user) {
+  function updateSidebarPermissions() {
     document.querySelectorAll('.admin-only').forEach(el => {
       el.style.display = Auth.isAdmin() ? '' : 'none';
     });
@@ -98,16 +89,8 @@ const App = (() => {
     const submitBtn = document.getElementById('loginBtn');
     const errorEl   = document.getElementById('loginError');
     const lockoutEl = document.getElementById('lockoutTimer');
-    if (!form) return;
-
-    document.querySelectorAll('.demo-account').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const uEl = document.getElementById('loginUsername');
-        const pEl = document.getElementById('loginPassword');
-        if (uEl) uEl.value = btn.dataset.user;
-        if (pEl) pEl.value = btn.dataset.pass;
-      });
-    });
+    if (!form || form._listenerAttached) return;
+    form._listenerAttached = true;
 
     const toggleBtn = document.getElementById('togglePassword');
     if (toggleBtn) {
@@ -282,8 +265,12 @@ const App = (() => {
       if (!Auth.isLoggedIn()) return;
       try {
         const overdue = await DB.stats.overdue();
-        const badge   = document.getElementById('overdueBadge');
-        if (badge) { badge.textContent = overdue.length; badge.style.display = overdue.length ? 'flex' : 'none'; }
+        const badge = document.getElementById('overdueBadge');
+        if (badge) {
+          const span = badge.querySelector('span');
+          if (span) span.textContent = overdue.length;
+          badge.classList.toggle('hidden', overdue.length === 0);
+        }
       } catch (e) { /* ignore */ }
     };
     await check();
