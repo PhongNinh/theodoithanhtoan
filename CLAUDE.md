@@ -104,6 +104,21 @@ Phân quyền chuyển trạng thái:
 | `_ensurePasswords` mỗi login | `auth.js` | Gọi mỗi lần login → chuyển vào `App.init()` một lần |
 | AntiDebug interval | `security.js` | `setInterval` 3s theo dõi devtools → xóa, không cần cho tool nội bộ |
 
+## Khởi tạo lần đầu (Auto-seed)
+
+Khi `pt_users` trống, `App.init()` tự động gọi `DB.seedDefaultUsers()` để tạo 6 tài khoản mặc định. Mật khẩu lưu dạng `__plain__xxx` và được hash ngay sau đó bởi `DB._ensurePasswords()`.
+
+| Username | Mật khẩu | Vai trò |
+|----------|----------|---------|
+| `admin` | `admin123` | Quản trị viên |
+| `phongnx` | `123456` | Viễn thông |
+| `ductt` | `123456` | Viễn thông |
+| `datnt` | `123456` | Viễn thông |
+| `quyetph` | `123456` | Kế toán |
+| `hanhn` | `123456` | Kế toán |
+
+> Seed chỉ tạo user **chưa tồn tại** (check theo `username`), không ghi đè user hiện có.
+
 ## Thêm người dùng mới
 
 1. Admin đăng nhập → **Quản lý Người dùng** → **Thêm người dùng**

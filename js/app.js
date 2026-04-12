@@ -25,7 +25,8 @@ const App = (() => {
   async function init() {
     if (window.Security) Security.init();
 
-    // Đảm bảo mật khẩu __plain__ được hash trước khi ai đăng nhập
+    // Tạo users mặc định nếu bảng trống, sau đó hash mật khẩu __plain__
+    try { await DB.seedDefaultUsers(); } catch (_) {}
     try { await DB._ensurePasswords(); } catch (_) {}
 
     try {

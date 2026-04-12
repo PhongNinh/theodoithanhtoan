@@ -381,6 +381,33 @@ const DB = (() => {
     }
   };
 
+  /* ─── Default Users (seed lần đầu) ─── */
+  const DEFAULT_USERS = [
+    { id: 'u_admin',   username: 'admin',   displayName: 'Quản trị viên',     role: 'admin',      department: 'admin',      avatar: 'AD', color: '#dc3545', password: 'admin123' },
+    { id: 'u_phongnx', username: 'phongnx', displayName: 'Ninh Xuân Phong',   role: 'telecom',    department: 'telecom',    avatar: 'NP', color: '#007bff', password: '123456' },
+    { id: 'u_ductt',   username: 'ductt',   displayName: 'Trần Tuấn Đức',     role: 'telecom',    department: 'telecom',    avatar: 'TĐ', color: '#17a2b8', password: '123456' },
+    { id: 'u_datnt',   username: 'datnt',   displayName: 'Nguyễn Tiến Đạt',   role: 'telecom',    department: 'telecom',    avatar: 'NĐ', color: '#6f42c1', password: '123456' },
+    { id: 'u_quyetph', username: 'quyetph', displayName: 'Phạm Hoàng Quyết',  role: 'accounting', department: 'accounting', avatar: 'PQ', color: '#28a745', password: '123456' },
+    { id: 'u_hanhn',   username: 'hanhn',   displayName: 'Hồ Ngọc Hân',       role: 'accounting', department: 'accounting', avatar: 'NH', color: '#e83e8c', password: '123456' }
+  ];
+
+  async function seedDefaultUsers() {
+    const existing = await listAll('pt_users');
+    const existingNames = new Set(existing.map(u => u.username));
+    for (const u of DEFAULT_USERS) {
+      if (!existingNames.has(u.username)) {
+        await createRow('pt_users', {
+          id: u.id, username: u.username, displayName: u.displayName,
+          role: u.role, department: u.department,
+          passwordHash: '__plain__' + u.password,
+          avatar: u.avatar, color: u.color,
+          active: true, loginCount: 0, lastLogin: '', email: ''
+        });
+      }
+    }
+    invalidate('users');
+  }
+
   /* ─── Public API ─── */
   return {
     WORKFLOW_STEPS,
@@ -393,7 +420,7 @@ const DB = (() => {
     comments,
     stats,
     invalidateAll,
-    // helper cho auth
+    seedDefaultUsers,
     _ensurePasswords: async () => {
       const all = await listAll('pt_users');
       for (const u of all) {
