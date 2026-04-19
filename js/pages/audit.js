@@ -190,6 +190,8 @@ const PageAudit = (() => {
 
   /* ─── Export CSV (async) ─── */
   async function exportLog() {
+    // Ensure users cache is populated
+    if (!_allUsers.length) _allUsers = await DB.users.getAll();
     const logs = await DB.auditLogs.getAll(1000);
     const rows = logs.map(l => {
       const actor  = _allUsers.find(u => u.id === l.userId);

@@ -105,19 +105,9 @@ const PageDossiers = (() => {
 
 ${buildDetailModal()}
 ${buildFormModal()}
-${buildTransitionModal()}
-<div id="confirmModal" class="modal">
-  <div class="modal-dialog modal-sm">
-    <div class="modal-header"><h3>Xác nhận</h3></div>
-    <div class="modal-body"><p id="confirmMessage"></p></div>
-    <div class="modal-footer">
-      <button id="confirmCancel" class="btn btn-secondary" onclick="Utils.Modal.hide('confirmModal')">Hủy</button>
-      <button id="confirmOk" class="btn btn-danger">Xác nhận</button>
-    </div>
-  </div>
-</div>`;
+${buildTransitionModal()}`;
 
-    document.getElementById('mainContent').innerHTML = html;
+  document.getElementById('mainContent').innerHTML = html;
 
     // Tải users một lần để dùng trong form
     _allUsers = await DB.users.getAll();

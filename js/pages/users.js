@@ -74,18 +74,6 @@ const PageUsers = (() => {
       </button>
     </div>
   </div>
-</div>
-
-<!-- Confirm Modal -->
-<div id="confirmModal" class="modal">
-  <div class="modal-dialog modal-sm">
-    <div class="modal-header"><h3>Xác nhận</h3></div>
-    <div class="modal-body"><p id="confirmMessage"></p></div>
-    <div class="modal-footer">
-      <button id="confirmCancel" class="btn btn-secondary" onclick="Utils.Modal.hide('confirmModal')">Hủy</button>
-      <button id="confirmOk" class="btn btn-danger">Xác nhận</button>
-    </div>
-  </div>
 </div>`;
 
     document.getElementById('mainContent').innerHTML = html;

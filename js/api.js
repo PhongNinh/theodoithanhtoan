@@ -138,14 +138,14 @@ const API = (() => {
 
       // Notify assignee
       if (clean.assigneeId && clean.assigneeId !== clean.creatorId) {
-        DB.notifications.create({
+        await DB.notifications.create({
           userId: clean.assigneeId, type: 'new_assignment',
           title: 'Hồ sơ mới được giao',
           message: `${dossierId} - ${clean.projectName} đã được giao cho bạn`,
           dossierRef: dossierId
         });
       }
-      DB.auditLogs.log(clean.creatorId, 'CREATE_DOSSIER', dossierId, 'dossier', { projectName: clean.projectName, amount: clean.amount });
+      await DB.auditLogs.log(clean.creatorId, 'CREATE_DOSSIER', dossierId, 'dossier', { projectName: clean.projectName, amount: clean.amount });
       DB.invalidateAll();
 
       const users = await DB.users.getAll();
@@ -174,7 +174,7 @@ const API = (() => {
       };
 
       const updated = await DB.dossiers.update(cleanId, clean);
-      DB.auditLogs.log(Auth.getCurrentUser().id, 'UPDATE_DOSSIER', cleanId, 'dossier', { fields: Object.keys(clean) });
+      await DB.auditLogs.log(Auth.getCurrentUser().id, 'UPDATE_DOSSIER', cleanId, 'dossier', { fields: Object.keys(clean) });
       DB.invalidateAll();
       const users = await DB.users.getAll();
       return ok(await enrich({ ...dossier, ...clean }, users));
@@ -187,7 +187,7 @@ const API = (() => {
       const dossier = await DB.dossiers.getById(cleanId);
       if (!dossier) return err('Không tìm thấy hồ sơ', 404);
       await DB.dossiers.delete(cleanId);
-      DB.auditLogs.log(Auth.getCurrentUser().id, 'DELETE_DOSSIER', cleanId, 'dossier', { projectName: dossier.projectName });
+      await DB.auditLogs.log(Auth.getCurrentUser().id, 'DELETE_DOSSIER', cleanId, 'dossier', { projectName: dossier.projectName });
       DB.invalidateAll();
       return ok({ deleted: true });
     },
@@ -210,20 +210,20 @@ const API = (() => {
       const result = await DB.workflow.transition(dosId, cleanStatus, user.id, cleanNote);
       if (!result.ok) return err(result.reason);
 
-      DB.auditLogs.log(user.id, 'STATUS_CHANGE', dosId, 'dossier', { from: dossier.status, to: cleanStatus, note: cleanNote });
+      await DB.auditLogs.log(user.id, 'STATUS_CHANGE', dosId, 'dossier', { from: dossier.status, to: cleanStatus, note: cleanNote });
 
       // Notify
       const actors = new Set([dossier.creatorId, dossier.assigneeId].filter(Boolean));
       actors.delete(user.id);
       const stepLabel = DB.WORKFLOW_STEPS.find(s => s.id === cleanStatus)?.label || cleanStatus;
-      actors.forEach(uid => {
+      await Promise.all([...actors].map(uid =>
         DB.notifications.create({
           userId: uid, type: 'status_change',
           title: 'Trạng thái hồ sơ thay đổi',
           message: `${dosId} - ${dossier.projectName}: → ${stepLabel}`,
           dossierRef: dosId
-        });
-      });
+        })
+      ));
 
       DB.invalidateAll();
       const updatedDossier = await DB.dossiers.getById(cleanId);
@@ -267,7 +267,7 @@ const API = (() => {
         active:      data.active !== undefined ? Boolean(data.active) : user.active
       };
       await DB.users.update(cleanId, clean);
-      DB.auditLogs.log(Auth.getCurrentUser().id, 'UPDATE_USER', cleanId, 'user', { fields: Object.keys(clean) });
+      await DB.auditLogs.log(Auth.getCurrentUser().id, 'UPDATE_USER', cleanId, 'user', { fields: Object.keys(clean) });
       DB.invalidateAll();
       const updated = await DB.users.getById(cleanId);
       return ok(safeUser(updated));
@@ -279,7 +279,7 @@ const API = (() => {
       const cleanId = Security.XSS.sanitizeInput(id);
       if (cleanId === Auth.getCurrentUser().id) return err('Không thể xóa tài khoản đang đăng nhập', 400);
       await DB.users.delete(cleanId);
-      DB.auditLogs.log(Auth.getCurrentUser().id, 'DELETE_USER', cleanId, 'user', {});
+      await DB.auditLogs.log(Auth.getCurrentUser().id, 'DELETE_USER', cleanId, 'user', {});
       DB.invalidateAll();
       return ok({ deleted: true });
     }
@@ -299,7 +299,7 @@ const API = (() => {
 
       const user    = Auth.getCurrentUser();
       const comment = await DB.comments.add(dossier.dossierId || cleanId, user.id, cleanText);
-      DB.auditLogs.log(user.id, 'ADD_COMMENT', cleanId, 'dossier', { commentId: comment.id });
+      await DB.auditLogs.log(user.id, 'ADD_COMMENT', cleanId, 'dossier', { commentId: comment.id });
       return ok(comment);
     },
 
